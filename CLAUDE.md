@@ -139,6 +139,11 @@ claude-trading-agents/
 - 所有对外接口写 docstring（中文说明 + 英文参数）
 - 关键计算步骤打 log（使用 Python `logging` 模块，不要用 print）
 - 错误处理：明确捕获预期异常（网络超时、数据缺失），不要用裸 `except`
+- **文件 I/O 编码规范**：所有文件读写必须显式指定 `encoding`，禁止依赖系统默认值
+  - CSV：`encoding="utf-8-sig"`（带 BOM，兼容 Excel 直接打开不乱码）
+  - JSON：`encoding="utf-8"` + `json.dump(..., ensure_ascii=False)`（保留中文原文，避免 `\uXXXX` 转义）
+  - 日志文件：`encoding="utf-8"`
+  - 其他文本读取：`encoding="utf-8"`
 
 ## 开发工作流
 
