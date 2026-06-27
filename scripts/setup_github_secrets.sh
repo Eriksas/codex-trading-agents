@@ -2,7 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCAL_ENV="${CLAUDE_TRADING_AGENTS_ENV:-$HOME/.secrets/claude_trading_agents.env}"
+LOCAL_ENV="${CODEX_TRADING_AGENTS_ENV:-${CLAUDE_TRADING_AGENTS_ENV:-$HOME/.secrets/codex_trading_agents.env}}"
+if [[ ! -f "$LOCAL_ENV" && -f "$HOME/.secrets/claude_trading_agents.env" ]]; then
+  LOCAL_ENV="$HOME/.secrets/claude_trading_agents.env"
+fi
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "gh CLI is required." >&2

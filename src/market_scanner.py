@@ -266,7 +266,7 @@ def _fuyao_get(path: str, params: dict[str, Any], timeout: int = 20) -> dict:
     resp = requests.get(
         f"{FUYAO_BASE_URL}{path}",
         params=params,
-        headers={"X-api-key": key, "User-Agent": "claude-trading-agents/1.0"},
+        headers={"X-api-key": key, "User-Agent": "codex-trading-agents/1.0"},
         timeout=timeout,
         verify=_verify_path(),
     )

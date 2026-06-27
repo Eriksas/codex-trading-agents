@@ -1,8 +1,8 @@
-# Claude Trading Agents — AI 工作流 SOP
+# Codex Trading Agents — AI 工作流 SOP
 
 ## 概览
 
-本文档记录在构建"Claude Code Sub-agents 金融数据分析工作流"过程中的实际观察、踩坑经验和关键决策。内容面向技术复盘和面试展示，不包含任何投资建议。
+本文档记录在构建"Codex / Claude Sub-agents 金融数据分析工作流"过程中的实际观察、踩坑经验和关键决策。内容面向技术复盘和面试展示，不包含任何投资建议。
 
 ---
 

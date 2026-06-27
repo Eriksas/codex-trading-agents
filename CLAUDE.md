@@ -1,4 +1,4 @@
-# Claude / Codex Project Instructions
+# Legacy Agent Compatibility Instructions
 
 This repository is now maintained under the shared project rules in `AGENTS.md`.
 
