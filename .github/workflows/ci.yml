@@ -1,0 +1,32 @@
+name: Repository Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate JSON files
+        run: |
+          python -m json.tool watchlist.json >/dev/null
+          python -m json.tool strategy.json >/dev/null
+
+      - name: Compile Python files
+        run: |
+          python -m py_compile $(git ls-files '*.py')
+
+      - name: Check shell syntax
+        run: |
+          bash -n scripts/*.sh

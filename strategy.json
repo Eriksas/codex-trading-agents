@@ -1,0 +1,147 @@
+{
+  "name": "balanced_research_watchlist",
+  "description": "观察池多因子筛选策略，仅用于研究性排序，不构成任何投资建议",
+  "version": "1.0",
+  "universe": "watchlist",
+  "top_n": 5,
+  "weights": {
+    "quality": 0.25,
+    "growth": 0.20,
+    "valuation": 0.20,
+    "momentum": 0.25,
+    "risk": 0.10
+  },
+  "thresholds": {
+    "rsi_overheat": 75,
+    "rsi_cold": 30,
+    "pe_percentile_high": 85,
+    "pe_percentile_low": 35,
+    "roe_good": 10,
+    "revenue_yoy_good": 15,
+    "net_profit_yoy_good": 15
+  },
+  "hard_filters": {
+    "require_complete_data": true,
+    "exclude_missing_market_cap": true,
+    "exclude_missing_pe_percentile": true
+  },
+  "market_scanner": {
+    "data": {
+      "enrich_limit": 120,
+      "stock_lookback_calendar_days": 260,
+      "index_lookback_calendar_days": 260,
+      "cache_enabled": true,
+      "cache_dir": "data/cache/market_scanner",
+      "refresh_overlap_days": 7,
+      "stale_cache_allowed": true
+    },
+    "filters": {
+      "min_price": 3,
+      "min_turnover": 1000000000,
+      "min_market_cap": 50000000000,
+      "max_change_rate": 0.095,
+      "max_amplitude": 0.12,
+      "max_5d_return": 0.28,
+      "max_60d_return": 1.5,
+      "max_volatility_20d": 0.09,
+      "max_volume_ratio": 5,
+      "min_close_to_20d_high": -0.12
+    },
+    "trade_plan": {
+      "base_position_pct": 8,
+      "high_amplitude_position_pct": 5,
+      "hot_5d_position_pct": 5,
+      "hot_day_position_pct": 4,
+      "pullback_factor": 0.35,
+      "pullback_min": 0.008,
+      "pullback_max": 0.025,
+      "chase_factor": 0.12,
+      "chase_min": 0.003,
+      "chase_max": 0.012,
+      "stop_factor": 0.75,
+      "stop_min": 0.035,
+      "stop_max": 0.08,
+      "reward_risk": 1.6,
+      "high_amplitude_threshold": 0.09,
+      "hot_5d_threshold": 0.14,
+      "hot_day_threshold": 0.07
+    },
+    "market_regimes": {
+      "risk_on": {
+        "min_score": 70,
+        "candidate_limit": 5,
+        "position_multiplier": 1.0,
+        "max_position_pct": 8,
+        "min_final_score": 88
+      },
+      "neutral": {
+        "min_score": 50,
+        "candidate_limit": 4,
+        "position_multiplier": 0.8,
+        "max_position_pct": 6,
+        "min_final_score": 90
+      },
+      "cautious": {
+        "min_score": 35,
+        "candidate_limit": 3,
+        "position_multiplier": 0.6,
+        "max_position_pct": 5,
+        "min_final_score": 92
+      },
+      "defensive": {
+        "candidate_limit": 1,
+        "position_multiplier": 0.35,
+        "max_position_pct": 3,
+        "min_final_score": 95
+      }
+    },
+    "backtest": {
+      "min_score": 70,
+      "max_hold_days": 5,
+      "entry_window_days": 2,
+      "cost_bps": 15,
+      "stop_slippage_bps": 30,
+      "portfolio_initial_cash": 1000000,
+      "portfolio_max_positions": 4,
+      "portfolio_max_total_exposure_pct": 0.32,
+      "portfolio_default_position_pct": 0.08
+    },
+    "ledger": {
+      "dir": "data/ledger",
+      "pending_file": "pending_trades.csv",
+      "archive_file": "trade_archive.csv",
+      "same_symbol_active_policy": "skip"
+    },
+    "review": {
+      "enabled": true,
+      "max_report_items": 8
+    },
+    "strategy_health": {
+      "enabled": true,
+      "windows": [
+        5,
+        20,
+        60
+      ],
+      "history_days": 120,
+      "min_sample": 10,
+      "max_tag_rows": 12
+    },
+    "strategy_steward": {
+      "enabled": false,
+      "mode": "daily",
+      "script": "scripts/run_strategy_steward.sh",
+      "fail_on_error": false,
+      "timeout_seconds": 900
+    },
+    "strategy_learning": {
+      "enabled": true,
+      "memory_dir": "data/strategy_learning"
+    }
+  },
+  "_notes": [
+    "该策略输出观察优先级，不输出买入/卖出/持有结论",
+    "默认仅在 watchlist 内排序；后续可扩展为全 A 初筛后复用同一 scoring",
+    "估值主要使用 PE 近三年分位数，降低不同行业 PE 绝对值不可比的影响"
+  ]
+}

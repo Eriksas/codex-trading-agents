@@ -1,5 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Local OS / editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Local agent/editor state
+.claude/
+.codex/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+secrets/
+
+# Runtime outputs
 output/
 logs/
-__pycache__/
-*.pyc
-.venv/
+*.log
+
+# Local market data, ledgers, cache, and learned memory.
+# These can contain personal watch history or generated trading plans.
+data/*
+!data/.gitkeep
+!data/README.md
+strategy_experiments/*
+!strategy_experiments/.gitkeep
+!strategy_experiments/README.md
+
+# Common local storage files
+*.sqlite
+*.sqlite3
+*.db

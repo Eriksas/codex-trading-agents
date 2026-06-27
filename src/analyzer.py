@@ -181,7 +181,8 @@ def _detect_macd_status(df: pd.DataFrame, lookback: int = 5) -> str:
 
 def _detect_rsi_zone(df: pd.DataFrame) -> str:
     """RSI(14) 当前值所处区间：overbought(>70) / oversold(<30) / neutral。"""
-    rsi_val = _safe_float(df[_RSI].dropna().iloc[-1]) if _RSI in df.columns else None
+    rsi_series = df[_RSI].dropna() if _RSI in df.columns else pd.Series(dtype=float)
+    rsi_val = _safe_float(rsi_series.iloc[-1]) if not rsi_series.empty else None
     if rsi_val is None:
         return "neutral"
     if rsi_val > 70:
@@ -193,9 +194,12 @@ def _detect_rsi_zone(df: pd.DataFrame) -> str:
 
 def _detect_bollinger_position(df: pd.DataFrame) -> str:
     """收盘价相对布林带的位置：upper_break / lower_break / in_band。"""
-    last = df[[_BBL, _BBU, "close"]].dropna().iloc[-1] if _BBL in df.columns else None
-    if last is None:
+    if _BBL not in df.columns or _BBU not in df.columns:
         return "in_band"
+    boll = df[[_BBL, _BBU, "close"]].dropna()
+    if boll.empty:
+        return "in_band"
+    last = boll.iloc[-1]
     close, bbl, bbu = last["close"], last[_BBL], last[_BBU]
     if close > bbu:
         return "upper_break"
@@ -347,18 +351,36 @@ def compute_fundamental(raw_fundamental: dict, code: str) -> dict:
         "net_profit_yoy":  _safe_pct(raw_fundamental.get("net_profit_yoy")),
         "report_date":     raw_fundamental.get("report_date"),
         "pe_percentile_3y": compute_pe_percentile(code, pe),
+        "latest_price_source": raw_fundamental.get("latest_price_source"),
+        "market_info_source": raw_fundamental.get("market_info_source"),
+        "market_cap_calc": raw_fundamental.get("market_cap_calc"),
+        "pe_source": raw_fundamental.get("pe_source") or raw_fundamental.get("pe_ttm_source"),
+        "pb_source": raw_fundamental.get("pb_source"),
     }
 
     fetch_errors = raw_fundamental.get("fetch_errors", [])
+    fetch_warnings = raw_fundamental.get("fetch_warnings", [])
     observations: list[str] = []
+    data_quality_issues: list[str] = []
     if fetch_errors:
         observations.append(f"数据抓取部分失败，缺失来源: {', '.join(fetch_errors)}")
+        data_quality_issues.append(f"fetch_errors: {', '.join(fetch_errors)}")
+    if fetch_warnings:
+        observations.append(f"部分主数据源失败，已使用备用路径: {', '.join(fetch_warnings)}")
+    if raw_fundamental.get("market_info_source") in {"historical_cache", "financial_derived"}:
+        source = raw_fundamental.get("market_info_source")
+        calc = raw_fundamental.get("market_cap_calc")
+        cache_date = raw_fundamental.get("market_info_cache_date")
+        suffix = f"，缓存日期 {cache_date}" if cache_date else ""
+        observations.append(f"market_cap 使用备用来源 {source}{suffix}（{calc}）")
     if metrics["market_cap"] is None:
         observations.append("market_cap 数据缺失（计算异常，已跳过）")
+        data_quality_issues.append("market_cap missing")
     if metrics["pe_percentile_3y"] is None:
         observations.append("pe_percentile_3y 无法计算（历史 PE 数据不可用）")
+        data_quality_issues.append("pe_percentile_3y missing")
 
-    return {"metrics": metrics, "observations": observations}
+    return {"metrics": metrics, "observations": observations, "data_quality_issues": data_quality_issues}
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +438,9 @@ def analyze_stock(code: str, raw_dir: Path, analysis_dir: Path) -> dict:
         try:
             fundamental = compute_fundamental(raw_fund, code)
             result["fundamental"] = fundamental
+            if fundamental.get("data_quality_issues"):
+                result["data_quality"] = "partial"
+                result["data_quality_reason"] = "基本面数据存在缺失或计算跳过项"
             logger.info(f"[{code}] 基本面处理完成")
         except Exception as e:
             logger.error(f"[{code}] compute_fundamental 未捕获异常: {e}")
@@ -428,7 +453,7 @@ def analyze_stock(code: str, raw_dir: Path, analysis_dir: Path) -> dict:
     tech_ok = result["technical"] is not None and "error" not in result["technical"]
     fund_ok = result["fundamental"] is not None and "error" not in result["fundamental"]
 
-    if result["data_quality"] != "partial":  # 未被行数不足降级
+    if result["data_quality"] != "partial":  # 未被行数不足或基本面缺失降级
         if tech_ok and fund_ok:
             result["data_quality"] = "complete"
         elif tech_ok or fund_ok:
@@ -454,6 +479,7 @@ def _write_result(result: dict, code: str, analysis_dir: Path) -> None:
 def run_analysis(
     watchlist_path: str = "watchlist.json",
     output_base: str = "output",
+    date: Optional[str] = None,
 ) -> list[dict]:
     """
     主入口：对 watchlist 中所有股票顺序执行分析。
@@ -461,12 +487,13 @@ def run_analysis(
     Args:
         watchlist_path: watchlist.json 路径
         output_base:    输出根目录
+        date:           输出日期（YYYY-MM-DD），None 时取今日
     Returns:
         所有股票的分析状态列表
     """
     import json as _json
 
-    today = datetime.today().strftime("%Y-%m-%d")
+    today = date or datetime.today().strftime("%Y-%m-%d")
     raw_dir = Path(output_base) / today / "raw"
     analysis_dir = Path(output_base) / today / "analysis"
 

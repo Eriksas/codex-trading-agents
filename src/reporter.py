@@ -132,6 +132,19 @@ def load_fetch_summary(raw_dir: Path) -> Optional[dict]:
         return None
 
 
+def load_selection(output_dir: Path) -> Optional[dict]:
+    """加载 selection/selection.json（用于策略筛选章节）。"""
+    path = output_dir / "selection" / "selection.json"
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"selection.json 读取失败: {e}")
+        return None
+
+
 def load_watchlist(watchlist_path: str = "watchlist.json") -> dict[str, dict]:
     """返回 code → stock_info 映射，用于补充名称、行业。"""
     try:
@@ -161,9 +174,60 @@ def _render_overview(analyses: list[dict], date_str: str) -> str:
         "## 一、市场概览\n",
         f"- **观察标的数量**：{len(analyses)} 只",
         f"- **数据质量**：complete {complete} 只，partial {partial} 只，failed {failed} 只",
-        f"- **数据来源**：OHLCV（新浪财经）、基本面（东方财富 + 百度股市通 + 同花顺）",
+        f"- **数据来源**：OHLCV（东方财富 / 新浪财经 / 腾讯财经），基本面（腾讯实时行情 / 东方财富 / 百度股市通 / 同花顺）",
         f"- **报告生成时间**：{now_str}",
     ]
+    return "\n".join(lines) + "\n"
+
+
+def _render_selection_section(selection: Optional[dict]) -> str:
+    """渲染策略筛选摘要。"""
+    if not selection:
+        return ""
+
+    strategy = selection.get("strategy") or {}
+    ranked = selection.get("ranked") or []
+    top_n = int(selection.get("top_n") or len(ranked))
+    display_items = ranked[:top_n]
+
+    lines = [
+        "## 二、策略筛选摘要\n",
+        "> 本节为观察池排序结果，仅用于研究性跟踪，不构成任何投资建议。\n",
+        f"- **策略**：{strategy.get('name', 'unknown')}（{strategy.get('version', 'unknown')}）",
+        f"- **通过硬过滤**：{selection.get('passed_count', 0)} / {selection.get('total', 0)} 只",
+        "",
+        "| 排名 | 标的 | 总分 | 质量 | 成长 | 估值 | 动量 | 风险 | 状态 |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    for item in display_items:
+        scores = item.get("factor_scores") or {}
+        status = "通过" if item.get("passed_filters") else "未通过"
+        lines.append(
+            "| {rank} | {code} | {total:.1f} | {quality:.1f} | {growth:.1f} | {valuation:.1f} | {momentum:.1f} | {risk:.1f} | {status} |".format(
+                rank=item.get("rank", "-"),
+                code=item.get("stock_code", "-"),
+                total=float(item.get("total_score") or 0),
+                quality=float(scores.get("quality") or 0),
+                growth=float(scores.get("growth") or 0),
+                valuation=float(scores.get("valuation") or 0),
+                momentum=float(scores.get("momentum") or 0),
+                risk=float(scores.get("risk") or 0),
+                status=status,
+            )
+        )
+
+    if display_items:
+        lines.append("")
+        lines.append("**排序依据摘要：**\n")
+        for item in display_items[:3]:
+            factor_notes = item.get("factor_notes") or {}
+            notes = []
+            for key in ["quality", "growth", "valuation", "momentum", "risk"]:
+                factor_note = factor_notes.get(key) or []
+                if factor_note:
+                    notes.append(factor_note[0])
+            lines.append(f"- {item.get('stock_code', '-')}：{'；'.join(notes[:4])}")
+
     return "\n".join(lines) + "\n"
 
 
@@ -254,19 +318,19 @@ def _render_single_stock(
 
 
 def _render_all_stocks(analyses: list[dict], watchlist_map: dict[str, dict]) -> str:
-    lines = ["## 二、逐股观察\n"]
+    lines = ["## 三、逐股观察\n"]
     for idx, analysis in enumerate(analyses, start=1):
         lines.append(_render_single_stock(analysis, idx, watchlist_map))
     return "\n".join(lines)
 
 
 def _render_quality_section(analyses: list[dict], fetch_summary: Optional[dict]) -> str:
-    lines = ["## 三、数据质量与异常提示\n"]
+    lines = ["## 四、数据质量与异常提示\n"]
 
     # 非 complete 的股票
     abnormal = [a for a in analyses if a.get("data_quality") != "complete"]
     if not abnormal:
-        lines.append("- 本次运行所有标的数据质量均为 complete，无异常。")
+        lines.append("- 本次运行所有标的数据质量均为 complete，未发现阻断性缺失或计算跳过项。")
     else:
         lines.append("**数据质量异常标的：**\n")
         for a in abnormal:
@@ -277,8 +341,8 @@ def _render_quality_section(analyses: list[dict], fetch_summary: Optional[dict])
 
     lines.append("")
 
-    # 数据源 fallback 情况
-    lines.append("**数据源使用情况：**\n")
+    # OHLCV 数据源 fallback 情况
+    lines.append("**OHLCV 数据源使用情况：**\n")
     if fetch_summary and "results" in fetch_summary:
         source_map: dict[str, list[str]] = {}
         for r in fetch_summary["results"]:
@@ -290,19 +354,56 @@ def _render_quality_section(analyses: list[dict], fetch_summary: Optional[dict])
     else:
         lines.append("- fetch_summary.json 不可用，来源信息缺失。")
 
-    # 基本面来源缺失汇总
     lines.append("")
+    lines.append("**基本面字段来源使用情况：**\n")
+    source_groups: dict[str, dict[str, list[str]]] = {
+        "最新价": {},
+        "市值/股本": {},
+        "PE": {},
+        "PB": {},
+    }
+    for a in analyses:
+        code = a.get("stock_code", "")
+        metrics = (a.get("fundamental") or {}).get("metrics") or {}
+        mappings = [
+            ("最新价", metrics.get("latest_price_source")),
+            ("市值/股本", metrics.get("market_info_source")),
+            ("PE", metrics.get("pe_source")),
+            ("PB", metrics.get("pb_source")),
+        ]
+        for label, source in mappings:
+            if source:
+                source_groups[label].setdefault(str(source), []).append(code)
+    for label, groups in source_groups.items():
+        if not groups:
+            lines.append(f"- {label}：来源未记录")
+            continue
+        detail = "；".join(f"{src}: {', '.join(codes)}" for src, codes in groups.items())
+        lines.append(f"- {label}：{detail}")
+
+    # 基本面备用来源与缺失汇总
+    lines.append("")
+    fallback_fund: list[str] = []
     missing_fund: list[str] = []
     for a in analyses:
         fund = a.get("fundamental") or {}
         obs  = fund.get("observations") or []
         for o in obs:
+            code = a.get("stock_code", "")
+            if "备用来源" in o or "备用路径" in o:
+                fallback_fund.append(f"- {code}：{o}")
             if "缺失来源" in o:
-                code = a.get("stock_code", "")
                 missing_fund.append(f"- {code}：{o}")
+    if fallback_fund:
+        lines.append("**基本面备用来源明细：**\n")
+        lines.extend(fallback_fund)
+        lines.append("")
     if missing_fund:
         lines.append("**基本面数据缺失明细：**\n")
         lines.extend(missing_fund)
+    elif fallback_fund:
+        lines.append("**基本面数据缺失明细：**\n")
+        lines.append("- 未发现阻断性基本面缺失；以上备用来源已在逐股段落中标注。")
 
     return "\n".join(lines) + "\n"
 
@@ -316,7 +417,7 @@ def _render_meta(date_str: str, fetch_summary: Optional[dict]) -> str:
     ta_ver  = getattr(ta, "version", "unknown")
 
     lines = [
-        "## 四、附录：本次运行元信息\n",
+        "## 五、附录：本次运行元信息\n",
         f"- **Python 版本**：{py_ver}",
         f"- **akshare 版本**：{ak_ver}",
         f"- **pandas-ta 版本**：{ta_ver}",
@@ -346,6 +447,7 @@ def _render_meta(date_str: str, fetch_summary: Optional[dict]) -> str:
 def generate_report(
     watchlist_path: str = "watchlist.json",
     output_base: str = "output",
+    date: Optional[str] = None,
 ) -> Optional[Path]:
     """
     主入口：读取当日分析结果，生成 Markdown 报告。
@@ -353,12 +455,14 @@ def generate_report(
     Args:
         watchlist_path: watchlist.json 路径
         output_base:    输出根目录
+        date:           输出日期（YYYY-MM-DD），None 时取今日
     Returns:
         报告文件路径，失败返回 None
     """
-    today = datetime.today().strftime("%Y-%m-%d")
+    today = date or datetime.today().strftime("%Y-%m-%d")
     analysis_dir = Path(output_base) / today / "analysis"
     raw_dir      = Path(output_base) / today / "raw"
+    output_dir   = Path(output_base) / today
     report_path  = Path(output_base) / today / "report.md"
 
     if not analysis_dir.exists():
@@ -367,6 +471,7 @@ def generate_report(
 
     analyses      = load_analysis_files(analysis_dir)
     fetch_summary = load_fetch_summary(raw_dir)
+    selection     = load_selection(output_dir)
     watchlist_map = load_watchlist(watchlist_path)
 
     if not analyses:
@@ -381,6 +486,8 @@ def generate_report(
         DISCLAIMER,
         "",
         _render_overview(analyses, today),
+        "",
+        _render_selection_section(selection),
         "",
         _render_all_stocks(analyses, watchlist_map),
         "",
