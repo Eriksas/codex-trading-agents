@@ -239,6 +239,7 @@ def _build_scan_digest(text: str, report_path: Path, max_chars: int) -> tuple[st
         ("**今日候选，不超过 5 只**", 12),
         ("**规则回测摘要（历史 K 样本）**", 9),
         ("**组合级回测摘要**", 8),
+        ("**影子实验评估**", 12),
         ("**Pending 台账**", 6),
         ("**明日复核要点**", 5),
     ]:

@@ -150,6 +150,12 @@ DEFAULT_SCANNER_CONFIG: dict[str, Any] = {
         "enabled": True,
         "memory_dir": "data/strategy_learning",
     },
+    "shadow_experiments": {
+        "enabled": True,
+        "risk_budget_account_pct": 0.002,
+        "risk_budget_max_position_pct": 8,
+        "risk_budget_min_stop_pct": 0.005,
+    },
 }
 
 ACTIVE_SCANNER_CONFIG: dict[str, Any] = DEFAULT_SCANNER_CONFIG.copy()
@@ -2214,6 +2220,345 @@ def _run_portfolio_backtest(trades: list[dict]) -> tuple[list[dict], dict]:
     return [*accepted, *skipped], summary
 
 
+def _summarize_shadow_returns(trades: list[dict], return_field: str = "net_return") -> dict:
+    """汇总影子实验单笔收益。"""
+    returns = [
+        _to_float(trade.get(return_field))
+        for trade in trades
+        if _to_float(trade.get(return_field)) is not None
+    ]
+    reason_counts: dict[str, int] = {}
+    for trade in trades:
+        reason = str(trade.get("exit_reason") or trade.get("shadow_exit_reason") or "unknown")
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    if not returns:
+        return {
+            "trade_count": 0,
+            "win_rate": None,
+            "average_return": None,
+            "median_return": None,
+            "best_trade_return": None,
+            "worst_trade_return": None,
+            "exit_reason_counts": reason_counts,
+        }
+    return {
+        "trade_count": len(returns),
+        "win_rate": round(sum(1 for ret in returns if ret > 0) / len(returns), 4),
+        "average_return": round(sum(returns) / len(returns), 5),
+        "median_return": round(median(returns), 5),
+        "best_trade_return": round(max(returns), 5),
+        "worst_trade_return": round(min(returns), 5),
+        "exit_reason_counts": reason_counts,
+    }
+
+
+def _simulate_next_day_open_trade(
+    trade: dict,
+    histories: dict[str, list[dict]],
+    max_hold_days: int,
+    cost_bps: float,
+) -> Optional[dict]:
+    """用既有信号测试“次一交易日开盘直接买入”的影子表现。"""
+    symbol = str(trade.get("symbol") or "")
+    signal_date = str(trade.get("signal_date") or "")
+    bars = histories.get(symbol) or []
+    if not symbol or not signal_date or len(bars) < 2:
+        return None
+    date_to_idx = {str(bar.get("date")): idx for idx, bar in enumerate(bars)}
+    signal_idx = date_to_idx.get(signal_date)
+    if signal_idx is None or signal_idx + 1 >= len(bars):
+        return None
+    entry_idx = signal_idx + 1
+    entry_bar = bars[entry_idx]
+    entry_price = _to_float(entry_bar.get("open"))
+    stop_loss = _to_float(trade.get("stop_loss"))
+    first_take_profit = _to_float(trade.get("first_take_profit"))
+    if entry_price is None or stop_loss is None or first_take_profit is None or entry_price <= 0:
+        return None
+
+    exit_idx = min(entry_idx + max_hold_days - 1, len(bars) - 1)
+    exit_price = _to_float(bars[exit_idx].get("close")) or entry_price
+    exit_reason = "timeout"
+    stop_metrics: dict[str, Any] = {
+        "stop_low_price": None,
+        "stop_breach_pct": None,
+        "stop_slippage_bps": float(_cfg("backtest", "stop_slippage_bps", 30)),
+        "slippage_exit_price": None,
+        "net_return_worst_intraday": None,
+        "net_return_slippage": None,
+        "slippage_vs_ideal_return": None,
+    }
+    for idx in range(entry_idx, min(entry_idx + max_hold_days, len(bars))):
+        bar = bars[idx]
+        low = _to_float(bar.get("low"))
+        high = _to_float(bar.get("high"))
+        if low is not None and low <= stop_loss:
+            exit_idx = idx
+            exit_price = stop_loss
+            exit_reason = "stop_loss"
+            stop_metrics.update(
+                _stop_execution_metrics(
+                    entry_price,
+                    stop_loss,
+                    low,
+                    cost_bps,
+                    float(_cfg("backtest", "stop_slippage_bps", 30)),
+                )
+            )
+            break
+        if high is not None and high >= first_take_profit:
+            exit_idx = idx
+            exit_price = first_take_profit
+            exit_reason = "take_profit"
+            break
+
+    gross_return = exit_price / entry_price - 1
+    net_return = gross_return - cost_bps / 10000
+    return {
+        "symbol": symbol,
+        "name": trade.get("name"),
+        "signal_date": signal_date,
+        "entry_date": entry_bar.get("date"),
+        "exit_date": bars[exit_idx].get("date"),
+        "signal_price": trade.get("signal_price"),
+        "entry_price": round(entry_price, 3),
+        "exit_price": round(exit_price, 3),
+        "stop_loss": stop_loss,
+        "first_take_profit": first_take_profit,
+        "holding_days": exit_idx - entry_idx + 1,
+        "exit_reason": exit_reason,
+        "gross_return": round(gross_return, 5),
+        "net_return": round(net_return, 5),
+        "position_pct": trade.get("position_pct"),
+        "market_regime_label": trade.get("market_regime_label"),
+        "score": trade.get("score"),
+        **stop_metrics,
+    }
+
+
+def _compound_position_returns(trades: list[dict], position_field: str = "position_pct") -> dict:
+    """按单笔仓位将交易收益折算到账户权益曲线。"""
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+    accepted = 0
+    exposure_values: list[float] = []
+    for trade in sorted(trades, key=lambda item: (str(item.get("entry_date") or ""), str(item.get("symbol") or ""))):
+        ret = _to_float(trade.get("net_return"))
+        position_pct = _to_float(trade.get(position_field))
+        if ret is None or position_pct is None or position_pct <= 0:
+            continue
+        accepted += 1
+        exposure = position_pct / 100
+        exposure_values.append(exposure)
+        equity *= 1 + ret * exposure
+        peak = max(peak, equity)
+        if peak:
+            max_drawdown = min(max_drawdown, equity / peak - 1)
+    return {
+        "trade_count": accepted,
+        "total_return": round(equity - 1, 5),
+        "max_drawdown": round(max_drawdown, 5),
+        "average_position_pct": round((sum(exposure_values) / len(exposure_values)) * 100, 2) if exposure_values else None,
+    }
+
+
+def _apply_risk_budget_positions(trades: list[dict]) -> list[dict]:
+    """按每笔最大账户风险反推影子仓位。"""
+    account_risk_pct = float(_cfg("shadow_experiments", "risk_budget_account_pct", 0.002))
+    max_position_pct = float(_cfg("shadow_experiments", "risk_budget_max_position_pct", 8))
+    min_stop_pct = float(_cfg("shadow_experiments", "risk_budget_min_stop_pct", 0.005))
+    rows: list[dict] = []
+    for trade in trades:
+        entry_price = _to_float(trade.get("entry_price"))
+        stop_loss = _to_float(trade.get("stop_loss"))
+        original_position = _to_float(trade.get("position_pct")) or max_position_pct
+        if entry_price is None or stop_loss is None or entry_price <= 0:
+            budget_position = min(original_position, max_position_pct)
+            stop_distance = None
+        else:
+            stop_distance = max((entry_price - stop_loss) / entry_price, min_stop_pct)
+            budget_position = min(max_position_pct, account_risk_pct / stop_distance * 100)
+            budget_position = min(budget_position, original_position)
+        rows.append(
+            {
+                **trade,
+                "risk_budget_position_pct": round(max(0.0, budget_position), 2),
+                "risk_budget_account_pct": account_risk_pct,
+                "stop_distance_pct": round(stop_distance, 5) if stop_distance is not None else None,
+            }
+        )
+    return rows
+
+
+def _run_shadow_experiments(
+    backtest_trades: list[dict],
+    histories: dict[str, list[dict]],
+    cost_bps: float,
+    max_hold_days: int,
+) -> tuple[list[dict], dict, str]:
+    """生成不影响主策略的影子实验评估。"""
+    next_open_trades = [
+        trade
+        for trade in (
+            _simulate_next_day_open_trade(item, histories, max_hold_days=max_hold_days, cost_bps=cost_bps)
+            for item in backtest_trades
+        )
+        if trade is not None
+    ]
+    risk_budget_trades = _apply_risk_budget_positions(backtest_trades)
+    current_account = _compound_position_returns(backtest_trades)
+    risk_budget_account = _compound_position_returns(risk_budget_trades, position_field="risk_budget_position_pct")
+
+    defensive_trades = [trade for trade in backtest_trades if trade.get("market_regime_label") == "防守"]
+    non_defensive_trades = [trade for trade in backtest_trades if trade.get("market_regime_label") != "防守"]
+    stop_trades = [trade for trade in backtest_trades if trade.get("exit_reason") == "stop_loss"]
+    stop_slippage = [
+        _to_float(trade.get("net_return_slippage"))
+        for trade in stop_trades
+        if _to_float(trade.get("net_return_slippage")) is not None
+    ]
+    stop_worst = [
+        _to_float(trade.get("net_return_worst_intraday"))
+        for trade in stop_trades
+        if _to_float(trade.get("net_return_worst_intraday")) is not None
+    ]
+    stop_ideal = [
+        _to_float(trade.get("net_return"))
+        for trade in stop_trades
+        if _to_float(trade.get("net_return")) is not None
+    ]
+
+    current_summary = _summarize_shadow_returns(backtest_trades)
+    next_open_summary = _summarize_shadow_returns(next_open_trades)
+    delta_avg = None
+    if current_summary.get("average_return") is not None and next_open_summary.get("average_return") is not None:
+        delta_avg = round(next_open_summary["average_return"] - current_summary["average_return"], 5)
+    summary = {
+        "enabled": True,
+        "sample_scope": "基于已触发入场的规则回测样本做影子对照；不改主策略、不写入台账。",
+        "current_trigger": current_summary,
+        "next_day_open_buy": {
+            **next_open_summary,
+            "average_return_delta_vs_current": delta_avg,
+            "note": "同一批已触发信号，改为次一交易日开盘直接入场，并沿用原止损/第一止盈/持有期。",
+        },
+        "defensive_skip": {
+            "current_defensive_trade_count": len(defensive_trades),
+            "non_defensive_trade_count": len(non_defensive_trades),
+            "note": "当前历史回测已按市场环境过滤防守期新信号；若这里出现防守样本，需优先复查过滤口径。",
+        },
+        "risk_budget_position": {
+            "account_risk_pct": float(_cfg("shadow_experiments", "risk_budget_account_pct", 0.002)),
+            "max_position_pct": float(_cfg("shadow_experiments", "risk_budget_max_position_pct", 8)),
+            "current_fixed_position_account": current_account,
+            "risk_budget_account": risk_budget_account,
+            "average_position_delta_pct": (
+                round(
+                    (risk_budget_account.get("average_position_pct") or 0)
+                    - (current_account.get("average_position_pct") or 0),
+                    2,
+                )
+                if current_account.get("average_position_pct") is not None
+                and risk_budget_account.get("average_position_pct") is not None
+                else None
+            ),
+            "note": "每笔按最大账户风险反推仓位，并以上限和原策略仓位封顶；仅作影子评估。",
+        },
+        "stop_execution_pressure": {
+            "stop_loss_count": len(stop_trades),
+            "ideal_stop_average": round(sum(stop_ideal) / len(stop_ideal), 5) if stop_ideal else None,
+            "slippage_stop_average": round(sum(stop_slippage) / len(stop_slippage), 5) if stop_slippage else None,
+            "worst_intraday_average": round(sum(stop_worst) / len(stop_worst), 5) if stop_worst else None,
+            "note": "理想止损、滑点止损、日内最低压力三种口径并列，避免只看规则价。"
+        },
+        "promotion_rule": "影子实验只提供证据；样本不足或未经过 Hermes critic 与回测验证前，不提升为主策略。",
+    }
+    rows: list[dict] = []
+    for trade in next_open_trades:
+        rows.append({"experiment": "next_day_open_buy", **trade})
+    for trade in risk_budget_trades:
+        rows.append(
+            {
+                "experiment": "risk_budget_position",
+                "symbol": trade.get("symbol"),
+                "name": trade.get("name"),
+                "signal_date": trade.get("signal_date"),
+                "entry_date": trade.get("entry_date"),
+                "exit_date": trade.get("exit_date"),
+                "net_return": trade.get("net_return"),
+                "position_pct": trade.get("position_pct"),
+                "risk_budget_position_pct": trade.get("risk_budget_position_pct"),
+                "stop_distance_pct": trade.get("stop_distance_pct"),
+                "exit_reason": trade.get("exit_reason"),
+                "score": trade.get("score"),
+            }
+        )
+    report = _render_shadow_experiment_report(summary)
+    return rows, summary, report
+
+
+def _render_shadow_experiment_report(summary: dict) -> str:
+    """渲染影子实验 Markdown 报告。"""
+    current = summary.get("current_trigger") or {}
+    next_open = summary.get("next_day_open_buy") or {}
+    risk = summary.get("risk_budget_position") or {}
+    current_account = risk.get("current_fixed_position_account") or {}
+    risk_account = risk.get("risk_budget_account") or {}
+    stop = summary.get("stop_execution_pressure") or {}
+    defensive = summary.get("defensive_skip") or {}
+    return "\n".join(
+        [
+            "# 影子实验评估",
+            "",
+            "免责声明：本报告仅用于个人模拟复盘和策略实验设计，不构成投资建议。",
+            "",
+            "## 样本口径",
+            "",
+            f"- {summary.get('sample_scope')}",
+            f"- 晋级规则：{summary.get('promotion_rule')}",
+            "",
+            "## 实验对照",
+            "",
+            "| 实验 | 样本 | 胜率 | 平均单笔 | 中位单笔 | 最差单笔 | 备注 |",
+            "|---|---:|---:|---:|---:|---:|---|",
+            (
+                f"| 当前触发区间 | {current.get('trade_count', 0)} | {_fmt_pct(current.get('win_rate'))} | "
+                f"{_fmt_pct(current.get('average_return'))} | {_fmt_pct(current.get('median_return'))} | "
+                f"{_fmt_pct(current.get('worst_trade_return'))} | 主策略回测口径 |"
+            ),
+            (
+                f"| 次日开盘直接买 | {next_open.get('trade_count', 0)} | {_fmt_pct(next_open.get('win_rate'))} | "
+                f"{_fmt_pct(next_open.get('average_return'))} | {_fmt_pct(next_open.get('median_return'))} | "
+                f"{_fmt_pct(next_open.get('worst_trade_return'))} | "
+                f"平均差值 {_fmt_pct(next_open.get('average_return_delta_vs_current'))} |"
+            ),
+            "",
+            "## 防守环境跳过",
+            "",
+            f"- 当前回测中的防守环境交易数：{defensive.get('current_defensive_trade_count', 0)}",
+            f"- 非防守环境交易数：{defensive.get('non_defensive_trade_count', 0)}",
+            f"- 说明：{defensive.get('note')}",
+            "",
+            "## 风险预算仓位",
+            "",
+            f"- 单笔账户风险预算：{_fmt_pct(risk.get('account_risk_pct'))}",
+            f"- 原固定仓位折算收益：{_fmt_pct(current_account.get('total_return'))}，最大回撤 {_fmt_pct(current_account.get('max_drawdown'))}，平均仓位 {current_account.get('average_position_pct')}%",
+            f"- 风险预算仓位折算收益：{_fmt_pct(risk_account.get('total_return'))}，最大回撤 {_fmt_pct(risk_account.get('max_drawdown'))}，平均仓位 {risk_account.get('average_position_pct')}%",
+            f"- 平均仓位变化：{risk.get('average_position_delta_pct')} 个百分点",
+            "",
+            "## 止损执行压力",
+            "",
+            f"- 止损样本：{stop.get('stop_loss_count', 0)} 笔",
+            f"- 理想止损平均：{_fmt_pct(stop.get('ideal_stop_average'))}",
+            f"- 滑点止损平均：{_fmt_pct(stop.get('slippage_stop_average'))}",
+            f"- 日内最低压力平均：{_fmt_pct(stop.get('worst_intraday_average'))}",
+            f"- 说明：{stop.get('note')}",
+            "",
+        ]
+    )
+
+
 def _steward_output_path(output_base: str, date: str, mode: str) -> Path:
     """返回 Hermes 策略管家指定模式的产物路径。"""
     base = Path(output_base)
@@ -2351,6 +2696,7 @@ def _render_report(
     market_profile: Optional[dict] = None,
     backtest_summary: Optional[dict] = None,
     portfolio_summary: Optional[dict] = None,
+    shadow_summary: Optional[dict] = None,
     ledger_summary: Optional[dict] = None,
     review_summary: Optional[dict] = None,
     health_summary: Optional[dict] = None,
@@ -2368,6 +2714,7 @@ def _render_report(
         "- 已写入市场环境过滤到 `market_profile.json`",
         "- 已写入规则回测到 `backtest_trades.csv` / `backtest_summary.json`",
         "- 已写入组合级回测到 `portfolio_backtest_trades.csv` / `portfolio_backtest_summary.json`",
+        "- 已写入影子实验到 `shadow_experiments.csv` / `shadow_experiments_summary.json`",
         "- 已更新 pending/持仓台账到 `data/ledger/`",
         "- 已写入计划复盘到 `review_summary.json` / `review_report.md`",
         "- 已写入策略健康监控到 `strategy_health_summary.json` / `strategy_health_report.md`",
@@ -2617,6 +2964,51 @@ def _render_report(
             ]
         )
 
+    if shadow_summary:
+        current = shadow_summary.get("current_trigger") or {}
+        next_open = shadow_summary.get("next_day_open_buy") or {}
+        risk = shadow_summary.get("risk_budget_position") or {}
+        current_account = risk.get("current_fixed_position_account") or {}
+        risk_account = risk.get("risk_budget_account") or {}
+        stop = shadow_summary.get("stop_execution_pressure") or {}
+        lines.extend(
+            [
+                "",
+                "**影子实验评估**",
+                "",
+                (
+                    f"- 当前触发区间：{current.get('trade_count', 0)} 笔，"
+                    f"胜率 {_fmt_pct(current.get('win_rate'))}，"
+                    f"平均 {_fmt_pct(current.get('average_return'))}，"
+                    f"中位 {_fmt_pct(current.get('median_return'))}"
+                ),
+                (
+                    f"- 次日开盘直接买：{next_open.get('trade_count', 0)} 笔，"
+                    f"胜率 {_fmt_pct(next_open.get('win_rate'))}，"
+                    f"平均 {_fmt_pct(next_open.get('average_return'))}，"
+                    f"相对当前 {_fmt_pct(next_open.get('average_return_delta_vs_current'))}"
+                ),
+                (
+                    f"- 风险预算仓位：单笔账户风险 {_fmt_pct(risk.get('account_risk_pct'))}，"
+                    f"平均仓位 {risk_account.get('average_position_pct')}%，"
+                    f"折算收益 {_fmt_pct(risk_account.get('total_return'))}，"
+                    f"最大回撤 {_fmt_pct(risk_account.get('max_drawdown'))}"
+                ),
+                (
+                    f"- 固定仓位折算：平均仓位 {current_account.get('average_position_pct')}%，"
+                    f"折算收益 {_fmt_pct(current_account.get('total_return'))}，"
+                    f"最大回撤 {_fmt_pct(current_account.get('max_drawdown'))}"
+                ),
+                (
+                    f"- 止损压力：理想止损平均 {_fmt_pct(stop.get('ideal_stop_average'))}，"
+                    f"滑点止损平均 {_fmt_pct(stop.get('slippage_stop_average'))}，"
+                    f"日内最低压力平均 {_fmt_pct(stop.get('worst_intraday_average'))}"
+                ),
+                "- 说明：影子实验只提供证据，不改主策略、不写入台账；样本不足时仍优先不调参。",
+                "- 详情：`shadow_experiments_report.md`",
+            ]
+        )
+
     if ledger_summary:
         lines.extend(
             [
@@ -2720,6 +3112,16 @@ def run_market_scan(
         if histories else ([], {})
     )
     portfolio_trades, portfolio_summary = _run_portfolio_backtest(backtest_trades) if backtest_trades else ([], {})
+    shadow_rows: list[dict] = []
+    shadow_summary: dict[str, Any] = {}
+    shadow_report = ""
+    if backtest_trades and bool(_cfg("shadow_experiments", "enabled", True)):
+        shadow_rows, shadow_summary, shadow_report = _run_shadow_experiments(
+            backtest_trades,
+            histories,
+            cost_bps=float(_cfg("backtest", "cost_bps", 15)),
+            max_hold_days=int(_cfg("backtest", "max_hold_days", 5)),
+        )
     ledger_summary = _update_trade_ledger(candidates, stocks, today, output_dir)
     review_summary: dict[str, Any] = {}
     if _cfg("review", "enabled", True):
@@ -2790,10 +3192,24 @@ def run_market_scan(
         "portfolio_action", "score",
     ]
     _write_csv(output_dir / "portfolio_backtest_trades.csv", portfolio_trades, portfolio_fields)
+    shadow_fields = [
+        "experiment", "symbol", "name", "signal_date", "entry_date", "exit_date",
+        "signal_price", "entry_price", "exit_price", "stop_loss", "first_take_profit",
+        "holding_days", "exit_reason", "gross_return", "net_return", "position_pct",
+        "risk_budget_position_pct", "risk_budget_account_pct", "stop_distance_pct",
+        "stop_low_price", "stop_breach_pct", "stop_slippage_bps", "slippage_exit_price",
+        "net_return_worst_intraday", "net_return_slippage", "slippage_vs_ideal_return",
+        "market_regime_label", "score",
+    ]
+    _write_csv(output_dir / "shadow_experiments.csv", shadow_rows, shadow_fields)
     with open(output_dir / "backtest_summary.json", "w", encoding="utf-8") as f:
         json.dump(backtest_summary, f, ensure_ascii=False, indent=2)
     with open(output_dir / "portfolio_backtest_summary.json", "w", encoding="utf-8") as f:
         json.dump(portfolio_summary, f, ensure_ascii=False, indent=2)
+    with open(output_dir / "shadow_experiments_summary.json", "w", encoding="utf-8") as f:
+        json.dump(shadow_summary, f, ensure_ascii=False, indent=2)
+    with open(output_dir / "shadow_experiments_report.md", "w", encoding="utf-8") as f:
+        f.write(shadow_report)
     with open(output_dir / "market_profile.json", "w", encoding="utf-8") as f:
         json.dump(market_profile, f, ensure_ascii=False, indent=2)
 
@@ -2807,6 +3223,7 @@ def run_market_scan(
         market_profile,
         backtest_summary,
         portfolio_summary,
+        shadow_summary,
         ledger_summary,
         review_summary,
         health_summary,
@@ -2846,6 +3263,7 @@ def run_market_scan(
             market_profile,
             backtest_summary,
             portfolio_summary,
+            shadow_summary,
             ledger_summary,
             review_summary,
             health_summary,
@@ -2887,6 +3305,12 @@ def run_market_scan(
         f.write(f"- 候选数量：{len(candidates)}\n")
         f.write(f"- 回测笔数：{backtest_summary.get('trade_count', 0) if backtest_summary else 0}\n")
         f.write(f"- 组合回测接受交易：{portfolio_summary.get('accepted_trades', 0) if portfolio_summary else 0}\n")
+        if shadow_summary:
+            next_open = shadow_summary.get("next_day_open_buy") or {}
+            f.write(
+                f"- 影子实验：次日开盘平均 {next_open.get('average_return')}，"
+                f"相对当前 {next_open.get('average_return_delta_vs_current')}\n"
+            )
         f.write(f"- 台账 active：{ledger_summary.get('active_count', 0)}\n")
         f.write(f"- 复盘对象：{review_summary.get('reviewed_count', 0) if review_summary else 0}\n")
         f.write(f"- 策略健康主窗口样本：{(health_summary.get('primary_window') or {}).get('reviewed_count', 0) if health_summary else 0}\n")
@@ -2910,6 +3334,7 @@ def run_market_scan(
         "market_profile": market_profile,
         "backtest_summary": backtest_summary,
         "portfolio_summary": portfolio_summary,
+        "shadow_experiments_summary": shadow_summary,
         "ledger_summary": ledger_summary,
         "review_summary": review_summary,
         "strategy_health_summary": health_summary,
@@ -2924,6 +3349,9 @@ def run_market_scan(
         "backtest_summary_path": str(output_dir / "backtest_summary.json"),
         "portfolio_backtest_trades_path": str(output_dir / "portfolio_backtest_trades.csv"),
         "portfolio_backtest_summary_path": str(output_dir / "portfolio_backtest_summary.json"),
+        "shadow_experiments_path": str(output_dir / "shadow_experiments.csv"),
+        "shadow_experiments_summary_path": str(output_dir / "shadow_experiments_summary.json"),
+        "shadow_experiments_report_path": str(output_dir / "shadow_experiments_report.md"),
         "review_summary_path": review_summary.get("summary_path") if review_summary else None,
         "review_report_path": review_summary.get("report_path") if review_summary else None,
         "strategy_health_summary_path": health_summary.get("summary_path") if health_summary else None,

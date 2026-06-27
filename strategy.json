@@ -137,6 +137,12 @@
     "strategy_learning": {
       "enabled": true,
       "memory_dir": "data/strategy_learning"
+    },
+    "shadow_experiments": {
+      "enabled": true,
+      "risk_budget_account_pct": 0.002,
+      "risk_budget_max_position_pct": 8,
+      "risk_budget_min_stop_pct": 0.005
     }
   },
   "_notes": [
