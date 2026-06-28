@@ -42,52 +42,6 @@ DEFAULT_INDEXES = [
 FUYAO_BASE_URL = "https://fuyao.aicubes.cn"
 
 DEFAULT_SCANNER_CONFIG: dict[str, Any] = {
-    "active_strategy": "legacy_momentum_v1",
-    "strategies": {
-        "legacy_momentum_v1": {
-            "name": "legacy_momentum_v1",
-            "description": "Legacy momentum/volume scanner retained for rollback.",
-            "engine": "legacy_momentum",
-        },
-        "alpha040_v3_risk_controlled": {
-            "name": "alpha040_v3_risk_controlled",
-            "description": "Frozen Alpha040 V3 risk-controlled strategy.",
-            "engine": "alpha040_v3",
-            "ranking": {
-                "primary_factor": "alpha040",
-                "auxiliary_factors": ["rps60", "close_to_20d_high"],
-                "weights": {
-                    "alpha040_z": 0.55,
-                    "rps60_z": 0.30,
-                    "close_to_20d_high_z": 0.15,
-                },
-                "ma_alignment_bonus": 0.08,
-                "ma5_above_ma20_bonus": 0.04,
-                "ma20_distance_penalty_start": 0.12,
-                "ma20_distance_penalty_multiplier": 2.0,
-                "ma20_distance_penalty_cap": 0.35,
-            },
-            "filters": {
-                "open_only_market_regime_label": "积极",
-                "forbid_market_regime_labels": ["中性", "谨慎", "防守"],
-                "max_change_rate_5d": 0.2039,
-                "max_volatility_20d": 0.049826,
-                "require_close_above_ma20": True,
-            },
-            "risk_control": {
-                "stop_type": "atr",
-                "atr_window": 14,
-                "atr_multiplier": 2.0,
-                "reward_risk": 1.6,
-                "risk_budget_account_pct": 0.002,
-                "risk_budget_max_position_pct": 8,
-                "risk_budget_min_stop_pct": 0.005,
-            },
-            "upper_shadow": {
-                "mode": "label_only",
-            },
-        },
-    },
     "data": {
         "enrich_limit": 120,
         "stock_lookback_calendar_days": 260,
@@ -228,10 +182,6 @@ def _load_scanner_config(config_path: str = "strategy.json") -> dict[str, Any]:
         scanner_payload = payload.get("market_scanner") or {}
         if isinstance(scanner_payload, dict):
             config = _deep_merge(DEFAULT_SCANNER_CONFIG, scanner_payload)
-        if payload.get("active_strategy"):
-            config["active_strategy"] = payload.get("active_strategy")
-        if isinstance(payload.get("strategies"), dict):
-            config["strategies"] = _deep_merge(config.get("strategies") or {}, payload["strategies"])
     return config
 
 
@@ -244,39 +194,6 @@ def _set_active_config(config: dict[str, Any]) -> None:
 def _cfg(section: str, key: str, default: Any = None) -> Any:
     """读取本次运行配置。"""
     return (ACTIVE_SCANNER_CONFIG.get(section) or {}).get(key, default)
-
-
-def _active_strategy_key() -> str:
-    """返回当前启用策略版本。"""
-    return str(ACTIVE_SCANNER_CONFIG.get("active_strategy") or "legacy_momentum_v1")
-
-
-def _strategy_config(strategy_key: Optional[str] = None) -> dict[str, Any]:
-    """读取指定策略配置。"""
-    key = strategy_key or _active_strategy_key()
-    strategies = ACTIVE_SCANNER_CONFIG.get("strategies") or {}
-    return strategies.get(key) or {}
-
-
-def _strategy_cfg(section: str, key: str, default: Any = None, strategy_key: Optional[str] = None) -> Any:
-    """读取当前策略内的配置项。"""
-    return (_strategy_config(strategy_key).get(section) or {}).get(key, default)
-
-
-def _strategy_engine() -> str:
-    """当前策略引擎。"""
-    return str(_strategy_config().get("engine") or "legacy_momentum")
-
-
-def _is_alpha040_v3_active() -> bool:
-    """判断当前是否启用 Alpha040 V3 引擎。"""
-    return _strategy_engine() == "alpha040_v3"
-
-
-def _strategy_display_name() -> str:
-    """策略显示名。"""
-    config = _strategy_config()
-    return str(config.get("name") or _active_strategy_key())
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -1097,9 +1014,9 @@ def _score_stock(row: dict) -> dict:
     }
 
 
-def _build_legacy_trade_plan(item: dict) -> dict:
+def _build_trade_plan(item: dict) -> dict:
     """
-    由 legacy 动量策略固定规则生成模拟交易参数。
+    由固定规则生成模拟交易参数。
 
     触发区间、止损、第一止盈和仓位来自振幅、短期涨幅和最新价，不做主观预测。
     """
@@ -1156,74 +1073,16 @@ def _build_legacy_trade_plan(item: dict) -> dict:
     }
 
 
-def _build_trade_plan(item: dict) -> dict:
-    """
-    由当前启用策略生成模拟交易参数。
-
-    触发区间、止损、第一止盈和仓位来自固定规则，不做主观预测。
-    """
-    latest = item.get("latest") or 0.0
-    amplitude = item.get("amplitude") or 0.05
-    if not _is_alpha040_v3_active():
-        return _build_legacy_trade_plan(item)
-
-    pullback_pct = min(
-        max(amplitude * _cfg("trade_plan", "pullback_factor", 0.35), _cfg("trade_plan", "pullback_min", 0.008)),
-        _cfg("trade_plan", "pullback_max", 0.025),
-    )
-    chase_pct = min(
-        max(amplitude * _cfg("trade_plan", "chase_factor", 0.12), _cfg("trade_plan", "chase_min", 0.003)),
-        _cfg("trade_plan", "chase_max", 0.012),
-    )
-    trigger_low = latest * (1 - pullback_pct)
-    trigger_high = latest * (1 + chase_pct)
-    atr_value = _to_float(item.get("atr14"))
-    atr_multiplier = float(_strategy_cfg("risk_control", "atr_multiplier", 2.0))
-    fallback_stop_pct = min(
-        max(amplitude * _cfg("trade_plan", "stop_factor", 0.75), _cfg("trade_plan", "stop_min", 0.035)),
-        _cfg("trade_plan", "stop_max", 0.08),
-    )
-    stop_loss = latest - atr_value * atr_multiplier if atr_value is not None else latest * (1 - fallback_stop_pct)
-    stop_loss = max(0.01, stop_loss)
-    reward_risk = float(_strategy_cfg("risk_control", "reward_risk", _cfg("trade_plan", "reward_risk", 1.6)))
-    risk_per_share = max(latest - stop_loss, latest * 0.02)
-    first_take_profit = latest + risk_per_share * reward_risk
-    max_position = float(_strategy_cfg("risk_control", "risk_budget_max_position_pct", 8))
-    risk_budget = float(_strategy_cfg("risk_control", "risk_budget_account_pct", 0.002))
-    min_stop_pct = float(_strategy_cfg("risk_control", "risk_budget_min_stop_pct", 0.005))
-    stop_distance_pct = max((latest - stop_loss) / latest, min_stop_pct) if latest else min_stop_pct
-    position_pct = round(max(0.0, min(max_position, risk_budget / stop_distance_pct * 100)), 2)
-    plan = "冻结 Alpha040 V3：仅用于个人模拟；次日按触发区间观察，ATR 止损，风险预算仓位；不自动下单"
-    return {
-        **item,
-        "signal_price": round(latest, 2),
-        "trigger_zone": f"{trigger_low:.2f}-{trigger_high:.2f}",
-        "stop_loss": round(stop_loss, 2),
-        "first_take_profit": round(first_take_profit, 2),
-        "position_pct": position_pct,
-        "plan": plan,
-        "risk_per_share": round(risk_per_share, 2),
-        "reward_risk": reward_risk,
-        "atr14": round(atr_value, 4) if atr_value is not None else None,
-        "risk_budget_account_pct": risk_budget,
-        "stop_distance_pct": round(stop_distance_pct, 6),
-    }
-
-
 def _select_candidates(scored: list[dict], limit: int = 5, market_profile: Optional[dict] = None) -> list[dict]:
     """选择候选，限制单行业过度集中。"""
     selected: list[dict] = []
     sector_counts: dict[str, int] = {}
     effective_limit = min(limit, int(market_profile.get("candidate_limit", limit))) if market_profile else limit
-    if _is_alpha040_v3_active() and market_profile:
-        allow_label = _strategy_cfg("filters", "open_only_market_regime_label", "积极")
-        if market_profile.get("regime_label") != allow_label:
-            return []
     min_final_score = _to_float(market_profile.get("min_final_score")) if market_profile else None
     for item in sorted(scored, key=lambda x: x.get("final_score", x["score"]), reverse=True):
         if not item["passed"]:
             continue
-        if not _is_alpha040_v3_active() and min_final_score is not None and (item.get("final_score") or item["score"]) < min_final_score:
+        if min_final_score is not None and (item.get("final_score") or item["score"]) < min_final_score:
             continue
         sector = item.get("sector") or "unknown"
         if sector_counts.get(sector, 0) >= 2:
@@ -1533,176 +1392,8 @@ def _percentile_ranks(items: list[dict], field: str) -> dict[str, float]:
     return {symbol: 1 - idx / (len(valid) - 1) for idx, (symbol, _value) in enumerate(valid)}
 
 
-def _standardize_cross_section(items: list[dict], field: str) -> dict[str, float]:
-    """按字段做简单横截面 z-score。"""
-    valid = [
-        (str(item.get("symbol")), _to_float(item.get(field)))
-        for item in items
-        if item.get("symbol") and _to_float(item.get(field)) is not None
-    ]
-    if not valid:
-        return {}
-    values = [value for _symbol, value in valid if value is not None]
-    mean_value = sum(values) / len(values)
-    variance = sum((value - mean_value) ** 2 for value in values) / len(values)
-    std_value = variance ** 0.5
-    if std_value == 0:
-        return {symbol: 0.0 for symbol, _value in valid}
-    return {symbol: (float(value) - mean_value) / std_value for symbol, value in valid if value is not None}
-
-
-def _alpha040_from_bars(bars: list[dict], window: int = 26) -> Optional[float]:
-    """计算 Alpha040：26 日上涨量 / 下跌量 * 100。"""
-    if len(bars) < window + 1:
-        return None
-    up_volume = 0.0
-    down_volume = 0.0
-    for prev, curr in zip(bars[-window - 1: -1], bars[-window:]):
-        prev_close = _to_float(prev.get("close"))
-        close = _to_float(curr.get("close"))
-        volume = _to_float(curr.get("volume")) or 0.0
-        if prev_close is None or close is None:
-            continue
-        if close > prev_close:
-            up_volume += volume
-        else:
-            down_volume += volume
-    if down_volume <= 0:
-        return None
-    return up_volume / down_volume * 100
-
-
-def _atr_from_bars(bars: list[dict], window: int) -> Optional[float]:
-    """计算 ATR。"""
-    if len(bars) < max(6, window + 1):
-        return None
-    values: list[float] = []
-    for idx in range(max(1, len(bars) - window), len(bars)):
-        high = _to_float(bars[idx].get("high"))
-        low = _to_float(bars[idx].get("low"))
-        prev_close = _to_float(bars[idx - 1].get("close"))
-        if high is None or low is None or prev_close is None:
-            continue
-        values.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
-    if len(values) < max(5, window // 2):
-        return None
-    return sum(values) / len(values)
-
-
-def _upper_shadow_ratio(item: dict) -> Optional[float]:
-    """上影线比例，仅作为标签。"""
-    high = _to_float(item.get("high"))
-    low = _to_float(item.get("low"))
-    close = _to_float(item.get("latest") or item.get("close"))
-    if high is None or low is None or close is None or high <= low:
-        return None
-    return (high - close) / (high - low)
-
-
-def _alpha040_v3_rank_score(item: dict) -> Optional[float]:
-    """配置化 Alpha040 V3 排序分。"""
-    weights = _strategy_cfg("ranking", "weights", {})
-    alpha = _to_float(item.get("alpha040_z"))
-    rps60 = _to_float(item.get("rps60_z"))
-    high = _to_float(item.get("close_to_20d_high_z"))
-    latest = _to_float(item.get("latest"))
-    ma5 = _to_float(item.get("ma5"))
-    ma10 = _to_float(item.get("ma10"))
-    ma20 = _to_float(item.get("ma20"))
-    if alpha is None or rps60 is None or high is None:
-        return None
-    if bool(_strategy_cfg("filters", "require_close_above_ma20", True)) and (latest is None or ma20 is None or latest < ma20):
-        return None
-    score = (
-        float(weights.get("alpha040_z", 0.55)) * alpha
-        + float(weights.get("rps60_z", 0.30)) * rps60
-        + float(weights.get("close_to_20d_high_z", 0.15)) * high
-    )
-    if ma5 is not None and ma10 is not None and ma20 is not None and ma5 >= ma10 >= ma20:
-        score += float(_strategy_cfg("ranking", "ma_alignment_bonus", 0.08))
-    elif ma5 is not None and ma20 is not None and ma5 >= ma20:
-        score += float(_strategy_cfg("ranking", "ma5_above_ma20_bonus", 0.04))
-    if latest is not None and ma20:
-        distance = latest / ma20 - 1
-        start = float(_strategy_cfg("ranking", "ma20_distance_penalty_start", 0.12))
-        if distance > start:
-            multiplier = float(_strategy_cfg("ranking", "ma20_distance_penalty_multiplier", 2.0))
-            cap = float(_strategy_cfg("ranking", "ma20_distance_penalty_cap", 0.35))
-            score -= min(cap, (distance - start) * multiplier)
-    return round(score, 6)
-
-
-def _apply_alpha040_v3_strategy(scored: list[dict], histories: Optional[dict[str, list[dict]]] = None) -> list[dict]:
-    """应用冻结 Alpha040 V3 风控主策略。"""
-    histories = histories or {}
-    enriched = [item for item in scored if item.get("history_enriched")]
-    rps20_map = _percentile_ranks(enriched, "change_rate_20d")
-    rps60_map = _percentile_ranks(enriched, "change_rate_60d")
-    atr_window = int(_strategy_cfg("risk_control", "atr_window", 14))
-    for item in scored:
-        symbol = str(item.get("symbol") or "")
-        bars = histories.get(symbol) or []
-        item["rps20"] = round(rps20_map[symbol], 4) if symbol in rps20_map else None
-        item["rps60"] = round(rps60_map[symbol], 4) if symbol in rps60_map else None
-        if item.get("alpha040") is None and bars:
-            item["alpha040"] = _alpha040_from_bars(bars)
-        if item.get("atr14") is None and bars:
-            item["atr14"] = _atr_from_bars(bars, atr_window)
-        item["upper_shadow_ratio"] = _upper_shadow_ratio(item)
-
-    for field in ["alpha040", "rps60", "close_to_20d_high"]:
-        z_map = _standardize_cross_section(scored, field)
-        for item in scored:
-            symbol = str(item.get("symbol") or "")
-            item[f"{field}_z"] = round(z_map[symbol], 6) if symbol in z_map else None
-
-    max_5d = _to_float(_strategy_cfg("filters", "max_change_rate_5d", 0.2039))
-    max_vol = _to_float(_strategy_cfg("filters", "max_volatility_20d", 0.049826))
-    inherited_hard_reasons = (
-        "交易状态=",
-        "历史K线未补齐",
-        "价格过低或缺失",
-        "成交额不足",
-        "接近涨停",
-    )
-    for item in scored:
-        original_reasons = [x for x in str(item.get("filter_reasons") or "").split("；") if x]
-        filter_reasons = [
-            reason
-            for reason in original_reasons
-            if any(token in reason for token in inherited_hard_reasons)
-        ]
-        rank_score = _alpha040_v3_rank_score(item)
-        if rank_score is None:
-            filter_reasons.append("Alpha040 V3 排序条件不足或未通过趋势弱过滤")
-        change_5d = _to_float(item.get("change_rate_5d"))
-        volatility = _to_float(item.get("volatility_20d"))
-        if max_5d is not None and change_5d is not None and change_5d > max_5d:
-            filter_reasons.append(f"5日涨幅超过冻结阈值 {_fmt_pct(max_5d)}")
-        if max_vol is not None and volatility is not None and volatility > max_vol:
-            filter_reasons.append(f"20日波动率超过冻结阈值 {_fmt_pct(max_vol)}")
-        if item.get("alpha040") is None:
-            filter_reasons.append("alpha040 缺失")
-        if item.get("atr14") is None:
-            filter_reasons.append("ATR 数据不足")
-        item.update(
-            {
-                "strategy_score": round(rank_score or 0.0, 6),
-                "final_score": round(rank_score or -999.0, 6),
-                "alpha040_core_score": rank_score,
-                "strategy_tags": "Alpha040 V3" if rank_score is not None else "Alpha040 V3 未通过",
-                "strategy_notes": "alpha040 主排序 + rps60/20日高点辅助 + 积极环境 + 过热/波动过滤 + ATR风控",
-                "passed": rank_score is not None and not filter_reasons,
-                "filter_reasons": "；".join(filter_reasons),
-            }
-        )
-    return scored
-
-
-def _apply_strategy_overlays(scored: list[dict], histories: Optional[dict[str, list[dict]]] = None) -> list[dict]:
+def _apply_strategy_overlays(scored: list[dict]) -> list[dict]:
     """加入从开源策略中抽象出的透明规则标签和综合分。"""
-    if _is_alpha040_v3_active():
-        return _apply_alpha040_v3_strategy(scored, histories=histories)
     enriched = [item for item in scored if item.get("history_enriched")]
     rps20_map = _percentile_ranks(enriched, "change_rate_20d")
     rps60_map = _percentile_ranks(enriched, "change_rate_60d")
@@ -3017,7 +2708,6 @@ def _render_report(
     lines = [
         f"使用市场数据接口完成了 {now} 收盘扫描，并已维护观察台账：",
         "",
-        f"- 当前启用策略：{_strategy_display_name()}（`{_active_strategy_key()}`）",
         "- 已写入 `daily_scans.csv`",
         f"- 已写入 {len(candidates)} 只研究候选到 `research_candidates.csv`",
         f"- 已写入 {len(candidates)} 笔 pending 到 `simulated_trades.csv`",
@@ -3402,7 +3092,7 @@ def run_market_scan(
     active_ledger_rows = _read_csv_rows(pending_path)
     review_histories = _ensure_review_histories(active_ledger_rows, histories, source)
 
-    scored = _apply_strategy_overlays([_score_stock(row) for row in stocks], histories=histories)
+    scored = _apply_strategy_overlays([_score_stock(row) for row in stocks])
     scored.sort(key=lambda x: x.get("final_score", x["score"]), reverse=True)
     market_profile = _build_market_profile(indexes, scored)
     candidates = _select_candidates(scored, limit=limit, market_profile=market_profile)
@@ -3466,8 +3156,6 @@ def run_market_scan(
         "change_rate_20d", "change_rate_60d", "turnover", "turnover_rate",
         "amplitude", "market_cap", "ma5", "ma10", "ma20", "volume_ratio",
         "volatility_20d", "close_to_20d_high", "rps20", "rps60",
-        "alpha040", "alpha040_z", "rps60_z", "close_to_20d_high_z",
-        "alpha040_core_score", "atr14", "upper_shadow_ratio",
         "strategy_score", "final_score", "strategy_tags", "strategy_notes",
         "history_days", "history_enriched", "score", "passed",
         "filter_reasons", "reasons", "risk_notes",
@@ -3483,9 +3171,7 @@ def run_market_scan(
         "risk_per_share", "reward_risk",
         "plan", "latest", "change_rate", "change_rate_5d", "turnover",
         "turnover_rate", "amplitude", "rps20", "rps60", "strategy_score",
-        "final_score", "alpha040", "alpha040_core_score", "atr14",
-        "risk_budget_account_pct", "stop_distance_pct", "upper_shadow_ratio",
-        "strategy_tags", "score", "same_symbol_overlap",
+        "final_score", "strategy_tags", "score", "same_symbol_overlap",
         "same_symbol_active_trade_ids", "overlap_risk_note", "risk_notes",
     ]
     _write_csv(output_dir / "simulated_trades.csv", candidates, trade_fields)
@@ -3526,19 +3212,6 @@ def run_market_scan(
         f.write(shadow_report)
     with open(output_dir / "market_profile.json", "w", encoding="utf-8") as f:
         json.dump(market_profile, f, ensure_ascii=False, indent=2)
-    with open(output_dir / "strategy_version.json", "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "active_strategy": _active_strategy_key(),
-                "strategy_name": _strategy_display_name(),
-                "engine": _strategy_engine(),
-                "config_path": config_path,
-                "generated_at": datetime.now().isoformat(),
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
 
     report = _render_report(
         today,
@@ -3626,7 +3299,6 @@ def run_market_scan(
     with open(memory_path, "w", encoding="utf-8") as f:
         f.write(f"# 扫描记忆 - {today}\n\n")
         f.write(f"- 扫描时间：{datetime.now().isoformat()}\n")
-        f.write(f"- 当前策略：{_strategy_display_name()} / {_active_strategy_key()}\n")
         f.write(f"- 样本数量：{len(scored)}\n")
         f.write(f"- 历史K线补齐样本：{len(histories)}\n")
         f.write(f"- 市场环境：{market_profile.get('regime_label')}（{market_profile.get('score')}）\n")
@@ -3655,8 +3327,6 @@ def run_market_scan(
 
     return {
         "date": today,
-        "active_strategy": _active_strategy_key(),
-        "strategy_name": _strategy_display_name(),
         "sample_count": len(scored),
         "data_source": source,
         "candidate_count": len(candidates),

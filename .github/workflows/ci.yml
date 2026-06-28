@@ -22,6 +22,8 @@ jobs:
         run: |
           python -m json.tool watchlist.json >/dev/null
           python -m json.tool strategy.json >/dev/null
+          python -m json.tool strategy_legacy_v1.json >/dev/null
+          python -m json.tool freeze_v3_strategy.json >/dev/null
 
       - name: Compile Python files
         run: |

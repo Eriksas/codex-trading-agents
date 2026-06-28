@@ -4,73 +4,6 @@
   "version": "1.0",
   "universe": "watchlist",
   "top_n": 5,
-  "active_strategy": "alpha040_v3_risk_controlled",
-  "strategies": {
-    "legacy_momentum_v1": {
-      "name": "legacy_momentum_v1",
-      "description": "升级前主策略：动量、趋势、温和放量、波动和强势区综合打分。保留用于回滚和审计。",
-      "engine": "legacy_momentum",
-      "status": "legacy_retained"
-    },
-    "alpha040_v3_risk_controlled": {
-      "name": "alpha040_v3_risk_controlled",
-      "description": "Freeze V3 升级后的默认主策略；只用于个人模拟交易、复盘和研究，不连接实盘。",
-      "engine": "alpha040_v3",
-      "status": "active_default",
-      "ranking": {
-        "primary_factor": "alpha040",
-        "auxiliary_factors": [
-          "rps60",
-          "close_to_20d_high"
-        ],
-        "weights": {
-          "alpha040_z": 0.55,
-          "rps60_z": 0.30,
-          "close_to_20d_high_z": 0.15
-        },
-        "ma_alignment_bonus": 0.08,
-        "ma5_above_ma20_bonus": 0.04,
-        "ma20_distance_penalty_start": 0.12,
-        "ma20_distance_penalty_multiplier": 2.0,
-        "ma20_distance_penalty_cap": 0.35
-      },
-      "filters": {
-        "open_only_market_regime_label": "积极",
-        "forbid_market_regime_labels": [
-          "中性",
-          "谨慎",
-          "防守"
-        ],
-        "max_change_rate_5d": 0.2039,
-        "max_volatility_20d": 0.049826,
-        "require_close_above_ma20": true
-      },
-      "risk_control": {
-        "stop_type": "atr",
-        "atr_window": 14,
-        "atr_multiplier": 2.0,
-        "reward_risk": 1.6,
-        "risk_budget_account_pct": 0.002,
-        "risk_budget_max_position_pct": 8,
-        "risk_budget_min_stop_pct": 0.005
-      },
-      "trend": {
-        "mode": "weak_filter_only",
-        "require_close_above_ma20": true,
-        "ma_alignment_small_weight": true,
-        "far_above_ma20_penalty": true
-      },
-      "upper_shadow": {
-        "mode": "label_only",
-        "hard_filter": false
-      },
-      "execution_boundary": {
-        "live_trading": false,
-        "auto_order": false,
-        "human_review_required": true
-      }
-    }
-  },
   "weights": {
     "quality": 0.25,
     "growth": 0.20,
@@ -93,7 +26,6 @@
     "exclude_missing_pe_percentile": true
   },
   "market_scanner": {
-    "active_strategy": "alpha040_v3_risk_controlled",
     "data": {
       "enrich_limit": 120,
       "stock_lookback_calendar_days": 260,

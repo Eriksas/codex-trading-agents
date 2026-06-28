@@ -10,6 +10,7 @@
 - 收盘扫描：基于全市场快照、历史 K 线、RPS、均线趋势、量能、波动率和市场环境筛选候选。
 - 规则化计划：自动生成触发区间、止损、第一止盈、仓位和退出条件，用于模拟复盘。
 - 台账与回测：维护 pending/open/archive 台账，输出事件级和组合级回测摘要。
+- 因子研究：独立 shadow 模块评估现有因子、Alpha191 短周期子集、IC/RankIC、分组收益、相关性和消融实验。
 - 策略健康监控：按 5/20/60 日窗口复核触发率、止损率、止盈率、标签表现和市场环境差异。
 - Hermes 策略管家：只读诊断、反方审查、影子实验草案和学习记忆，不直接修改主策略。
 - 多通道推送：支持飞书应用机器人、飞书 webhook、企业微信、Telegram、Slack、Discord、邮件等。
@@ -53,6 +54,28 @@ python3 src/market_scanner.py --push --push-dry-run
 python3 src/market_scanner.py --push
 ```
 
+因子研究与策略消融 shadow experiment：
+
+```bash
+python3 src/factor_research.py
+python3 src/factor_research.py --max-symbols 300 --min-cross-section 30
+python3 src/factor_research_round2.py
+python3 src/factor_research_round3.py
+python3 src/factor_research_round4.py
+python3 src/factor_research_round5.py
+python3 src/factor_research_round6.py
+python3 src/factor_research_freeze_v3.py
+python3 src/forward_paper_trading_v3.py
+```
+
+主策略升级审计与 V3 日报：
+
+```bash
+python3 src/main_strategy_upgrade_v3.py
+python3 src/scheduled_v3_reporter.py
+python3 src/backtest_v3_expanded.py
+```
+
 Hermes 策略管家：
 
 ```bash
@@ -72,6 +95,13 @@ output/YYYY-MM-DD/
 data/ledger/
 data/cache/
 data/strategy_learning/
+output/factor_research/
+output/factor_research_round2/
+output/factor_research_round3/
+output/factor_research_round4/
+output/factor_research_round5/
+output/factor_research_round6/
+output/factor_research_freeze_v3/
 strategy_experiments/YYYY-MM-DD/
 logs/
 ```
@@ -84,6 +114,9 @@ logs/
 - `strategy.json`：市场扫描、交易计划、回测、台账、健康监控和 Hermes 配置。
 - `.env.example`：本地密钥和推送通道示例。
 - `.github/workflows/`：GitHub Actions 定时扫描和基础 CI。
+- `docs/factor_research.md`：因子研究与策略消融 shadow experiment 说明。
+- `docs/project_status_report.md`：当前项目状态、策略升级、验证结果和后续计划。
+- `docs/rollback_guide.md`：从 `alpha040_v3_risk_controlled` 回滚到 `legacy_momentum_v1` 的步骤。
 
 ## GitHub Actions
 

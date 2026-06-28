@@ -1,0 +1,62 @@
+{
+  "freeze_version": "alpha040_v3_risk_controlled",
+  "source_shadow_version": "v3_atr_risk_budget_hot5_vol_risk_on",
+  "stage": "main_strategy_upgrade_v3",
+  "rules": {
+    "ranking": {
+      "primary_factor": "alpha040",
+      "auxiliary_factors": [
+        "rps60",
+        "close_to_20d_high"
+      ],
+      "weights": {
+        "alpha040_z": 0.55,
+        "rps60_z": 0.30,
+        "close_to_20d_high_z": 0.15
+      }
+    },
+    "market_environment": {
+      "open_only_when": "积极",
+      "forbid_open_when": [
+        "中性",
+        "谨慎",
+        "防守"
+      ]
+    },
+    "risk_filters": {
+      "change_rate_5d_max": 0.2039,
+      "volatility_20d_max": 0.049826
+    },
+    "risk_control": {
+      "stop_type": "ATR",
+      "atr_window": 14,
+      "atr_multiplier": 2.0,
+      "reward_risk": 1.6,
+      "position_sizing": "risk_budget",
+      "risk_budget_account_pct": 0.002,
+      "risk_budget_max_position_pct": 8,
+      "risk_budget_min_stop_pct": 0.005
+    },
+    "trend": {
+      "mode": "weak_filter_only",
+      "require_close_above_ma20": true,
+      "ma_alignment_small_weight": true,
+      "distance_above_ma20_penalty": true
+    },
+    "upper_shadow_ratio": {
+      "mode": "label_only",
+      "hard_filter": false
+    },
+    "execution_boundary": {
+      "live_trading": false,
+      "auto_order": false,
+      "human_review_required": true
+    }
+  },
+  "rollback_target": "legacy_momentum_v1",
+  "notes": [
+    "Freeze V3 已在当前本地缓存样本内完成复跑和压力测试。",
+    "该文件是主策略升级审计快照，不作为实盘交易配置。",
+    "后续若要调参，必须重新进入 shadow research 和 freeze validation。"
+  ]
+}
