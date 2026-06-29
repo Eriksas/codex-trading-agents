@@ -1,4 +1,4 @@
-name: Daily Market Observation
+name: Manual Market Observation
 
 on:
   workflow_dispatch:
@@ -16,9 +16,6 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    # 18:30 Asia/Shanghai on weekdays, after A-share market close.
-    - cron: "30 10 * * 1-5"
 
 jobs:
   daily-analysis:
@@ -82,13 +79,3 @@ jobs:
             ARGS+=(--push-fail-on-error)
           fi
           python main_v2.py "${ARGS[@]}"
-
-      - name: Upload output artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-market-observation-output
-          path: |
-            output/
-            logs/
-          if-no-files-found: ignore

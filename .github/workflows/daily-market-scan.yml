@@ -1,4 +1,4 @@
-name: Daily Market Scan Push
+name: Manual Market Scan Push
 
 on:
   workflow_dispatch:
@@ -16,9 +16,6 @@ on:
         required: false
         default: false
         type: boolean
-  schedule:
-    # 18:30 Asia/Shanghai on weekdays, after A-share market close.
-    - cron: "30 10 * * 1-5"
 
 jobs:
   daily-market-scan:
@@ -83,13 +80,3 @@ jobs:
             ARGS+=(--push-fail-on-error)
           fi
           python src/market_scanner.py "${ARGS[@]}"
-
-      - name: Upload scan output artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-market-scan-output
-          path: |
-            output/
-            data/ledger/
-          if-no-files-found: ignore

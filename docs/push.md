@@ -116,24 +116,38 @@ python3 main_v2.py --push --push-dry-run
 
 ## GitHub Actions
 
-项目内有两个工作流模板：
+默认自动推送使用：
 
-- `.github/workflows/daily-market-scan.yml`：收盘扫描、候选、回测、台账与推送
-- `.github/workflows/daily-analysis.yml`：watchlist 每日分析报告与推送
+- `.github/workflows/daily-v3-feishu-push.yml`：北京时间工作日 19:10 运行，先执行主策略扫描生成当天缓存，再生成 `alpha040_v3_risk_controlled` V3 日报、记录 forward paper 信号，最后推送飞书摘要。
 
-- `schedule`：北京时间交易日 18:30 运行
-- `workflow_dispatch`：支持手动触发
-- 使用仓库 Secrets/Variables 注入推送配置
+备用手动工作流：
+
+- `.github/workflows/daily-market-scan.yml`：手动触发收盘扫描推送。
+- `.github/workflows/daily-analysis.yml`：手动触发 watchlist 每日分析推送。
+
+默认定时任务只把摘要发到飞书，不把 `output/`、`data/cache/`、`data/ledger/` 或 `logs/` 作为 GitHub artifact 上传。
 
 在 GitHub 仓库中进入 `Settings -> Secrets and variables -> Actions`，按需添加上述环境变量即可。
 
-收盘扫描工作流还需要：
+V3 自动推送至少需要：
 
 | 变量 | 用途 |
 |------|------|
 | `FUYAO_API_KEY` | 扶摇行情 API Key，放在 Actions Secrets |
+| `FEISHU_APP_ID` | 飞书开放平台应用 ID，放在 Actions Secrets |
+| `FEISHU_APP_SECRET` | 飞书应用密钥，放在 Actions Secrets |
+| `FEISHU_RECEIVE_ID` | 飞书接收人或群聊 ID，放在 Actions Secrets |
+| `FEISHU_RECEIVE_ID_TYPE` | 默认 `chat_id`，放在 Actions Variables |
 
-每次执行 `--push` 后会写入 `push_summary.json`，记录通道、状态和响应摘要。GitHub Actions 默认使用 `--push-fail-on-error`，如果某个已配置通道真实发送失败，工作流会失败；`dry-run` 不会触发失败。
+也可以改用飞书 webhook：配置 `FEISHU_WEBHOOK_URL`，如果开启签名再配置 `FEISHU_WEBHOOK_SECRET`。
+
+可用脚本把本机环境变量同步到 GitHub Secrets/Variables：
+
+```bash
+scripts/setup_github_secrets.sh
+```
+
+手动测试 GitHub workflow 时，在 Actions 页面选择 `Daily V3 Feishu Push`，先用 `push_dry_run=true` 检查配置；真实发送时改为 `false`。如果推送失败，workflow 会失败并在日志里显示失败通道，但不会打印 secret 值。
 
 ## 安全边界
 

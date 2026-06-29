@@ -120,7 +120,11 @@ logs/
 
 ## GitHub Actions
 
-仓库提供两个定时推送工作流：
+仓库默认使用一个定时推送工作流：
+
+- `.github/workflows/daily-v3-feishu-push.yml`：北京时间工作日 19:10 自动生成 V3 日报并推送飞书。
+
+另有两个手动备用工作流：
 
 - `.github/workflows/daily-market-scan.yml`
 - `.github/workflows/daily-analysis.yml`
@@ -134,11 +138,13 @@ FEISHU_APP_SECRET
 FEISHU_RECEIVE_ID
 ```
 
-可用脚本把本机环境变量同步到 GitHub Secrets：
+可用脚本把本机环境变量同步到 GitHub Secrets/Variables：
 
 ```bash
 scripts/setup_github_secrets.sh
 ```
+
+定时任务不会把 `output/`、`data/cache/`、`data/ledger/` 或 `logs/` 上传为 GitHub artifact，只在 runner 临时生成报告并推送摘要。
 
 ## 安全边界
 

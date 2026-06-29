@@ -33,12 +33,28 @@ set_secret() {
   local name="$1"
   local value="${!name:-}"
   if [[ -n "$value" ]]; then
-    printf '%s' "$value" | gh secret set "$name" --body-file -
+    printf '%s' "$value" | gh secret set "$name"
     echo "set $name"
   else
     echo "skip $name (empty)"
   fi
 }
+
+set_variable() {
+  local name="$1"
+  local value="${!name:-}"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value" | gh variable set "$name"
+    echo "set variable $name"
+  else
+    echo "skip variable $name (empty)"
+  fi
+}
+
+: "${FEISHU_RECEIVE_ID_TYPE:=chat_id}"
+: "${FEISHU_APP_MESSAGE_FORMAT:=post}"
+: "${FEISHU_WEBHOOK_MESSAGE_FORMAT:=post}"
+: "${SCAN_ENRICH_LIMIT:=120}"
 
 set_secret FUYAO_API_KEY
 set_secret FEISHU_APP_ID
@@ -46,3 +62,8 @@ set_secret FEISHU_APP_SECRET
 set_secret FEISHU_RECEIVE_ID
 set_secret FEISHU_WEBHOOK_URL
 set_secret FEISHU_WEBHOOK_SECRET
+
+set_variable FEISHU_RECEIVE_ID_TYPE
+set_variable FEISHU_APP_MESSAGE_FORMAT
+set_variable FEISHU_WEBHOOK_MESSAGE_FORMAT
+set_variable SCAN_ENRICH_LIMIT

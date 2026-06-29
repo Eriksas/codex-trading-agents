@@ -1,0 +1,103 @@
+name: Daily V3 Feishu Push
+
+on:
+  workflow_dispatch:
+    inputs:
+      push_mode:
+        description: "Push digest or full V3 report"
+        required: false
+        default: "digest"
+        type: choice
+        options:
+          - digest
+          - full
+      push_dry_run:
+        description: "Check push configuration without sending"
+        required: false
+        default: false
+        type: boolean
+      run_market_scan:
+        description: "Run market scan first to build fresh cache"
+        required: false
+        default: true
+        type: boolean
+      run_forward_paper:
+        description: "Record forward paper signals after report generation"
+        required: false
+        default: true
+        type: boolean
+      report_date:
+        description: "Optional YYYY-MM-DD override; blank uses latest available trading date"
+        required: false
+        default: ""
+        type: string
+  schedule:
+    # 19:10 Asia/Shanghai on weekdays, after A-share close data should be available.
+    - cron: "10 11 * * 1-5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-v3-feishu-push
+  cancel-in-progress: false
+
+jobs:
+  daily-v3-feishu-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TZ: Asia/Shanghai
+      PYTHONUNBUFFERED: "1"
+      FUYAO_API_KEY: ${{ secrets.FUYAO_API_KEY }}
+      FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+      FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
+      FEISHU_RECEIVE_ID_TYPE: ${{ vars.FEISHU_RECEIVE_ID_TYPE || 'chat_id' }}
+      FEISHU_APP_MESSAGE_FORMAT: ${{ vars.FEISHU_APP_MESSAGE_FORMAT || 'post' }}
+      FEISHU_WEBHOOK_MESSAGE_FORMAT: ${{ vars.FEISHU_WEBHOOK_MESSAGE_FORMAT || 'post' }}
+      PUSH_MODE: ${{ github.event.inputs.push_mode || 'digest' }}
+      PUSH_DRY_RUN: ${{ github.event.inputs.push_dry_run || 'false' }}
+      RUN_MARKET_SCAN: ${{ github.event.inputs.run_market_scan || 'true' }}
+      RUN_FORWARD_PAPER: ${{ github.event.inputs.run_forward_paper || 'true' }}
+      REPORT_DATE: ${{ github.event.inputs.report_date || '' }}
+      SCAN_ENRICH_LIMIT: ${{ vars.SCAN_ENRICH_LIMIT || '120' }}
+      FORWARD_OUTPUT_DIR: data/ledger/forward_paper_trading_v3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "${FUYAO_API_KEY:-}" ]; then
+            echo "Missing required secret: FUYAO_API_KEY" >&2
+            exit 1
+          fi
+          if [ -z "${FEISHU_WEBHOOK_URL:-}" ] && { [ -z "${FEISHU_APP_ID:-}" ] || [ -z "${FEISHU_APP_SECRET:-}" ] || [ -z "${FEISHU_RECEIVE_ID:-}" ]; }; then
+            echo "Configure either FEISHU_WEBHOOK_URL or FEISHU_APP_ID/FEISHU_APP_SECRET/FEISHU_RECEIVE_ID." >&2
+            exit 1
+          fi
+
+      - name: Run V3 report and Feishu push
+        id: v3
+        run: scripts/run_github_v3_daily_push.sh
+
+      - name: Show generated report path
+        if: always()
+        run: |
+          echo "Report date: ${{ steps.v3.outputs.report_date }}"
+          echo "V3 report path: ${{ steps.v3.outputs.v3_report_path }}"
