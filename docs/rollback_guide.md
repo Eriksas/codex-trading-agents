@@ -32,7 +32,7 @@ Use this only if the upgraded scanner path itself is suspected to be broken.
 
 ```bash
 cp strategy_legacy_v1.json strategy.json
-cp src/market_scanner_legacy_v1.py src/market_scanner.py
+cp archive/market_scanner_legacy_v1.py src/market_scanner.py
 ```
 
 Then run validation:
@@ -44,7 +44,7 @@ python3 src/market_scanner.py --strategy strategy.json
 ## Audit Files
 
 - Legacy config backup: `strategy_legacy_v1.json`
-- Legacy scanner backup: `src/market_scanner_legacy_v1.py`
+- Legacy scanner backup: `archive/market_scanner_legacy_v1.py`
 - Freeze V3 config snapshot: `freeze_v3_strategy.json`
 - Upgrade report: `output/main_strategy_upgrade_v3/main_strategy_upgrade_v3_report.md`
 

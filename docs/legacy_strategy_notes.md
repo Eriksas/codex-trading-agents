@@ -4,7 +4,7 @@
 
 - Strategy key: `legacy_momentum_v1`
 - Config backup: `strategy_legacy_v1.json`
-- Scanner backup: `src/market_scanner_legacy_v1.py`
+- Scanner backup: `archive/market_scanner_legacy_v1.py`
 - Status: retained for audit and rollback
 
 ## Summary

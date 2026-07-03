@@ -16,14 +16,22 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import subprocess
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from statistics import median, stdev
+from statistics import median
 from typing import Any, Optional
 
 import requests
+
+# 本文件已归档到 archive/；延迟导入的 reviewer/strategy_health/strategy_learning/notifier
+# 仍位于 src/，运行时需要把 src 加入模块搜索路径。
+_ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(_ROOT_DIR / "src") not in sys.path:
+    sys.path.insert(0, str(_ROOT_DIR / "src"))
 
 try:
     import certifi
@@ -31,6 +39,16 @@ except ImportError:  # pragma: no cover
     certifi = None
 
 logger = logging.getLogger(__name__)
+
+
+def _fast_stdev(values: list[float]) -> float:
+    """Float sample stdev equivalent to statistics.stdev, without Fraction overhead."""
+    n = len(values)
+    if n < 2:
+        return 0.0
+    mean = sum(values) / n
+    variance = sum((value - mean) ** 2 for value in values) / (n - 1)
+    return math.sqrt(variance)
 
 DEFAULT_INDEXES = [
     ("上证", "000001.SH"),
@@ -201,7 +219,8 @@ def _to_float(value: Any) -> Optional[float]:
     if value is None or value == "":
         return None
     try:
-        return float(value)
+        result = float(value)
+        return None if math.isnan(result) else result
     except (TypeError, ValueError):
         return None
 
@@ -571,7 +590,7 @@ def _enrich_with_history(row: dict, bars: list[dict]) -> dict:
     if len(returns) >= 10:
         recent_returns = returns[-20:]
         if len(recent_returns) >= 2:
-            volatility_20d = stdev(recent_returns)
+            volatility_20d = _fast_stdev(recent_returns)
 
     high_20d = max(highs[-20:]) if len(highs) >= 20 else None
     low_20d = min(lows[-20:]) if len(lows) >= 20 else None
@@ -615,7 +634,7 @@ def _enrich_index_with_history(row: dict, bars: list[dict]) -> dict:
     returns = _daily_returns(calc_closes)
     volatility_20d = None
     if len(returns) >= 2:
-        volatility_20d = stdev(returns[-20:]) if len(returns[-20:]) >= 2 else None
+        volatility_20d = _fast_stdev(returns[-20:]) if len(returns[-20:]) >= 2 else None
     ma20 = _moving_average(calc_closes, 20)
     ma60 = _moving_average(calc_closes, 60)
     current = latest if latest is not None else calc_closes[-1]
@@ -1313,7 +1332,7 @@ def _build_market_timeline(indexes: list[dict]) -> dict[str, dict]:
             ma60 = _moving_average(closes, 60)
             prev_close = bars[idx - 1]["close"] if idx > 0 else None
             change_rate = bars[idx]["close"] / prev_close - 1 if prev_close else None
-            volatility_20d = stdev(returns[-20:]) if len(returns[-20:]) >= 2 else None
+            volatility_20d = _fast_stdev(returns[-20:]) if len(returns[-20:]) >= 2 else None
             daily_metrics.setdefault(date, []).append(
                 {
                     "above_ma20": bars[idx]["close"] >= ma20 if ma20 is not None else None,
@@ -1488,21 +1507,47 @@ def _signal_row_from_bar(base_row: dict, bars: list[dict], idx: int) -> dict:
     """将历史某一天转换成扫描器可评分的伪快照。"""
     bar = bars[idx]
     prev_close = bars[idx - 1]["close"] if idx > 0 else None
-    closes = [x["close"] for x in bars[: idx + 1]]
-    highs = [x["high"] for x in bars[: idx + 1]]
-    lows = [x["low"] for x in bars[: idx + 1]]
-    turnovers = [x["turnover"] for x in bars[: idx + 1] if x.get("turnover") is not None]
     change_rate = bar["close"] / prev_close - 1 if prev_close else None
     amplitude = (bar["high"] - bar["low"]) / prev_close if prev_close else None
-    avg_turnover_20d = _moving_average(turnovers, 20)
+
+    recent_turnovers = [_to_float(x.get("turnover")) for x in bars[max(0, idx - 19) : idx + 1]]
+    valid_turnovers = [x for x in recent_turnovers if x is not None]
+    avg_turnover_20d = sum(valid_turnovers) / 20 if len(valid_turnovers) >= 20 else None
+
     volume_ratio = None
     if bar.get("turnover") is not None and avg_turnover_20d:
         volume_ratio = bar["turnover"] / avg_turnover_20d
-    returns = _daily_returns(closes)
-    volatility_20d = stdev(returns[-20:]) if len(returns[-20:]) >= 2 else None
-    high_20d = max(highs[-20:]) if len(highs) >= 20 else None
-    low_20d = min(lows[-20:]) if len(lows) >= 20 else None
+
+    recent_returns: list[float] = []
+    for return_idx in range(max(1, idx - 19), idx + 1):
+        prev = _to_float(bars[return_idx - 1].get("close"))
+        curr = _to_float(bars[return_idx].get("close"))
+        if prev and curr is not None:
+            recent_returns.append(curr / prev - 1)
+    volatility_20d = _fast_stdev(recent_returns) if len(recent_returns) >= 2 else None
+
+    window20 = bars[idx - 19 : idx + 1] if idx >= 19 else []
+    highs_20d = [_to_float(x.get("high")) for x in window20]
+    lows_20d = [_to_float(x.get("low")) for x in window20]
+    valid_highs_20d = [x for x in highs_20d if x is not None]
+    valid_lows_20d = [x for x in lows_20d if x is not None]
+    high_20d = max(valid_highs_20d) if len(valid_highs_20d) >= 20 else None
+    low_20d = min(valid_lows_20d) if len(valid_lows_20d) >= 20 else None
     close_to_20d_high = bar["close"] / high_20d - 1 if high_20d else None
+
+    def window_average(window: int) -> Optional[float]:
+        if idx + 1 < window:
+            return None
+        values = [_to_float(x.get("close")) for x in bars[idx - window + 1 : idx + 1]]
+        return sum(x for x in values if x is not None) / window if all(x is not None for x in values) else None
+
+    def window_return(window: int) -> Optional[float]:
+        if idx < window:
+            return None
+        base = _to_float(bars[idx - window].get("close"))
+        current = _to_float(bar.get("close"))
+        return current / base - 1 if base and current is not None else None
+
     return {
         "name": base_row.get("name"),
         "symkey": base_row.get("symkey"),
@@ -1513,15 +1558,15 @@ def _signal_row_from_bar(base_row: dict, bars: list[dict], idx: int) -> dict:
         "low": bar["low"],
         "prev_close": prev_close,
         "change_rate": change_rate,
-        "change_rate_5d": _series_return(closes, 5),
-        "change_rate_20d": _series_return(closes, 20),
-        "change_rate_60d": _series_return(closes, 60),
+        "change_rate_5d": window_return(5),
+        "change_rate_20d": window_return(20),
+        "change_rate_60d": window_return(60),
         "turnover": bar.get("turnover"),
         "volume": bar.get("volume"),
         "amplitude": amplitude,
-        "ma5": _moving_average(closes, 5),
-        "ma10": _moving_average(closes, 10),
-        "ma20": _moving_average(closes, 20),
+        "ma5": window_average(5),
+        "ma10": window_average(10),
+        "ma20": window_average(20),
         "avg_turnover_20d": avg_turnover_20d,
         "volume_ratio": volume_ratio,
         "volatility_20d": volatility_20d,

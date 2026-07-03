@@ -18,11 +18,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR / "src") not in sys.path:
     sys.path.insert(0, str(ROOT_DIR / "src"))
 
-import factor_research as fr
-import factor_research_round3 as r3
-import factor_research_round6 as r6
 import forward_paper_trading_v3 as forward
 import market_scanner as scanner
+import quant_core as qc
 
 DEFAULT_OUTPUT_BASE = Path("output")
 DEFAULT_FREEZE_CONFIG = Path("freeze_v3_strategy.json")
@@ -62,20 +60,20 @@ def generate_v3_daily_report(
     date: Optional[str] = None,
     output_base: Path = DEFAULT_OUTPUT_BASE,
     freeze_config_path: Path = DEFAULT_FREEZE_CONFIG,
-    cache_dir: Path = fr.DEFAULT_CACHE_DIR,
+    cache_dir: Path = qc.DEFAULT_CACHE_DIR,
 ) -> dict[str, Any]:
     """生成每日 V3 报告。"""
     scanner._set_active_config(scanner._load_scanner_config("strategy.json"))
     config = forward._load_freeze_config(freeze_config_path)
     thresholds = forward._freeze_thresholds(config)
-    histories = fr.load_cached_histories(cache_dir=cache_dir, min_bars=80)
-    metadata = r3._load_scan_metadata()
-    alpha040_map = r3._build_alpha040_map(histories)
-    universe_by_date, daily_universe = r3._build_dynamic_universe(histories, metadata, alpha040_map, 60, output_base / "_v3_daily_tmp")
+    histories = qc.load_cached_histories(cache_dir=cache_dir, min_bars=80)
+    metadata = qc._load_scan_metadata()
+    alpha040_map = qc._build_alpha040_map(histories)
+    universe_by_date, daily_universe = qc._build_dynamic_universe(histories, metadata, alpha040_map, 60, output_base / "_v3_daily_tmp")
     report_date = date or _latest_signal_date(universe_by_date)
-    market_timeline = r3._market_timeline()
+    market_timeline = qc._market_timeline()
     market_profile = market_timeline.get(report_date) or {}
-    strategy = r6.ShadowStrategy(
+    strategy = qc.ShadowStrategy(
         key="v3_atr_risk_budget_hot5_vol_risk_on",
         label="alpha040_v3_risk_controlled",
         stop_variant="atr_stop_risk_budget",
@@ -83,7 +81,7 @@ def generate_v3_daily_report(
         filter_hot_5d=True,
         filter_high_volatility=True,
     )
-    eligible, reason_counts = r6._eligible_for_strategy(universe_by_date.get(report_date, []), market_profile, strategy, thresholds)
+    eligible, reason_counts = qc._eligible_for_strategy(universe_by_date.get(report_date, []), market_profile, strategy, thresholds)
     candidate_limit = int(market_profile.get("candidate_limit") or 5)
     candidates = eligible[:candidate_limit] if market_profile.get("regime_label") == "积极" else []
     output_dir = output_base / report_date

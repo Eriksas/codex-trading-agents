@@ -149,12 +149,29 @@ def _standardize(values: list[Optional[float]]) -> list[Optional[float]]:
 
 def _build_alpha040_map(histories: dict[str, list[dict]]) -> dict[tuple[str, str], float]:
     """计算 alpha040 原始值映射。"""
-    panel = fr._compute_alpha191_subset(fr._bars_to_panel(histories))
     result: dict[tuple[str, str], float] = {}
-    if panel.empty or "alpha040" not in panel.columns:
-        return result
-    for _, row in panel[["date", "symbol", "alpha040"]].dropna().iterrows():
-        result[(row["date"].strftime("%Y-%m-%d"), str(row["symbol"]))] = float(row["alpha040"])
+    for symbol, bars in histories.items():
+        dates: list[str] = []
+        closes: list[Optional[float]] = []
+        volumes: list[Optional[float]] = []
+        for bar in bars:
+            date = str(bar.get("date") or "")
+            if not date:
+                continue
+            dates.append(date)
+            closes.append(_safe_float(bar.get("close")))
+            volumes.append(_safe_float(bar.get("volume")))
+        if len(dates) < 27:
+            continue
+        close = pd.Series(closes, dtype="float64")
+        volume = pd.Series(volumes, dtype="float64")
+        prev_close = close.shift(1)
+        up_volume = volume.where(close > prev_close, 0.0).rolling(26, min_periods=26).sum()
+        down_volume = volume.where(close <= prev_close, 0.0).rolling(26, min_periods=26).sum()
+        alpha040 = (up_volume / down_volume.replace(0, np.nan) * 100).replace([np.inf, -np.inf], np.nan)
+        for date, value in zip(dates, alpha040):
+            if pd.notna(value):
+                result[(date, str(symbol))] = float(value)
     return result
 
 

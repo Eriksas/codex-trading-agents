@@ -16,7 +16,7 @@ Codex Trading Agents 是一个个人量化辅助与 AI 工作流探索项目，�
 - 冻结来源: `v3_atr_risk_budget_hot5_vol_risk_on`
 - 旧策略保留: `legacy_momentum_v1`
 - 回滚配置: `strategy_legacy_v1.json`
-- 回滚入口: `src/market_scanner_legacy_v1.py`
+- 回滚入口: `archive/market_scanner_legacy_v1.py`
 - 回滚说明: `docs/rollback_guide.md`
 
 新主策略固定规则：
@@ -68,20 +68,20 @@ Codex Trading Agents 是一个个人量化辅助与 AI 工作流探索项目，�
 
 ### 因子研究与冻结验证
 
-- `src/factor_research.py`
-- `src/factor_research_round2.py`
-- `src/factor_research_round3.py`
-- `src/factor_research_round4.py`
-- `src/factor_research_round5.py`
-- `src/factor_research_round6.py`
-- `src/factor_research_freeze_v3.py`
+- `research/factor_research.py`
+- `research/factor_research_round2.py`
+- `research/factor_research_round3.py`
+- `research/factor_research_round4.py`
+- `research/factor_research_round5.py`
+- `research/factor_research_round6.py`
+- `research/factor_research_freeze_v3.py`
 
 这些模块均属于 shadow research，不直接修改主策略。它们覆盖 IC、RankIC、分组收益、相关性矩阵、Alpha040 Core、风险归因、组合回测增强、Freeze V3 稳定性测试。
 
 ### 数据扩展与扩展回测
 
-- `src/data_expansion_pipeline.py`
-- `src/backtest_v3_expanded.py`
+- `research/data_expansion_pipeline.py`
+- `research/backtest_v3_expanded.py`
 
 数据扩展模块优先尝试 Fuyao，其次 Tushare，失败时降级本地缓存。扩展回测入口会明确记录数据来源，当前 smoke 结果使用 `local_cache_explicit`。
 

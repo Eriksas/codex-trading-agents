@@ -1,17 +1,17 @@
 # 因子研究与策略消融模块
 
-`src/factor_research.py` 是独立 shadow research 模块，用于评估现有因子和 Alpha191 短周期量价子集。它不修改 `strategy.json` 主策略，不写交易台账，不连接实盘接口。
+`research/factor_research.py` 是独立 shadow research 模块，用于评估现有因子和 Alpha191 短周期量价子集。它不修改 `strategy.json` 主策略，不写交易台账，不连接实盘接口。
 
 ## 运行
 
 ```bash
-python3 src/factor_research.py
+python3 research/factor_research.py
 ```
 
 常用参数：
 
 ```bash
-python3 src/factor_research.py \
+python3 research/factor_research.py \
   --max-symbols 300 \
   --min-cross-section 30 \
   --output output/factor_research
@@ -20,37 +20,37 @@ python3 src/factor_research.py \
 第二轮审计与专项影子实验：
 
 ```bash
-python3 src/factor_research_round2.py
+python3 research/factor_research_round2.py
 ```
 
 第三轮 Alpha040 Core shadow strategy：
 
 ```bash
-python3 src/factor_research_round3.py
+python3 research/factor_research_round3.py
 ```
 
 第四轮风险归因与组合增强 shadow strategy：
 
 ```bash
-python3 src/factor_research_round4.py
+python3 research/factor_research_round4.py
 ```
 
 第五轮风险口径修正与止损归因 shadow strategy：
 
 ```bash
-python3 src/factor_research_round5.py
+python3 research/factor_research_round5.py
 ```
 
 第六轮 Alpha040 Risk-Controlled shadow strategy：
 
 ```bash
-python3 src/factor_research_round6.py
+python3 research/factor_research_round6.py
 ```
 
 Freeze Validation：
 
 ```bash
-python3 src/factor_research_freeze_v3.py
+python3 research/factor_research_freeze_v3.py
 python3 src/forward_paper_trading_v3.py
 ```
 
@@ -94,7 +94,7 @@ python3 src/forward_paper_trading_v3.py
 
 ## 第二轮审计
 
-`src/factor_research_round2.py` 输出到 `output/factor_research_round2/`，重点覆盖：
+`research/factor_research_round2.py` 输出到 `output/factor_research_round2/`，重点覆盖：
 
 - `universe_audit.md`：检查当前缓存股票池是否存在后验股票池偏差。
 - `top_abs_correlations.csv`：绝对相关最高的前 20 组因子。
@@ -108,7 +108,7 @@ python3 src/forward_paper_trading_v3.py
 
 ## 第三轮 Alpha040 Core
 
-`src/factor_research_round3.py` 输出到 `output/factor_research_round3/`，重点覆盖：
+`research/factor_research_round3.py` 输出到 `output/factor_research_round3/`，重点覆盖：
 
 - `daily_universe.csv`：逐日动态可交易股票池，含股票数和剔除原因统计。
 - `alpha040_core_selected_signals.csv`：Alpha040 Core 每日入选信号。
@@ -126,7 +126,7 @@ python3 src/forward_paper_trading_v3.py
 
 ## 第四轮风险归因
 
-`src/factor_research_round4.py` 输出到 `output/factor_research_round4/`，基于第三轮 Alpha040 Core 做组合层面的风险归因和风控 shadow 对照，不新增复杂因子。
+`research/factor_research_round4.py` 输出到 `output/factor_research_round4/`，基于第三轮 Alpha040 Core 做组合层面的风险归因和风控 shadow 对照，不新增复杂因子。
 
 - `portfolio_metrics.json`：初始资金、期末权益、累计收益、年化收益、最大回撤、夏普、卡玛和最大回撤区间。
 - `daily_equity.csv` / `monthly_returns.csv`：当前止损版本的每日权益曲线和月度收益。
@@ -141,7 +141,7 @@ python3 src/forward_paper_trading_v3.py
 
 ## 第五轮风险口径修正
 
-`src/factor_research_round5.py` 输出到 `output/factor_research_round5/`，重点解决 Round4 暴露出的 universe 覆盖、市场环境口径混用、止损/跌停归因和 A/C 风控版本取舍问题，不新增复杂因子。
+`research/factor_research_round5.py` 输出到 `output/factor_research_round5/`，重点解决 Round4 暴露出的 universe 覆盖、市场环境口径混用、止损/跌停归因和 A/C 风控版本取舍问题，不新增复杂因子。
 
 - `universe_zero_reason_summary.csv` / `universe_zero_audit.md`：读取 Round4 的 universe 为 0 日期，按缓存覆盖、过滤过严、数据缺失、涨跌停过滤和其他原因重新归类。
 - `market_regime_event_summary.csv`：事件级 trade sequence 表现，只含交易数、胜率、平均单笔、中位数和最大连续亏损。
@@ -156,7 +156,7 @@ python3 src/forward_paper_trading_v3.py
 
 ## 第六轮风险控制策略
 
-`src/factor_research_round6.py` 输出到 `output/factor_research_round6/`，基于 Round5 的风险阈值构建 Alpha040 Risk-Controlled Shadow Strategy，重点验证减少亏损交易，不以单纯提高收益为目标。
+`research/factor_research_round6.py` 输出到 `output/factor_research_round6/`，基于 Round5 的风险阈值构建 Alpha040 Risk-Controlled Shadow Strategy，重点验证减少亏损交易，不以单纯提高收益为目标。
 
 - `strategy_comparison.csv`：baseline、版本1、版本2、版本3 的事件交易数、组合接受交易数、收益、回撤、夏普、卡玛、胜率、平均单笔、中位数、最大连续亏损、止损和跌停无法卖出次数。
 - `monthly_returns_by_version.csv`：四个版本的月度收益宽表。
@@ -170,7 +170,7 @@ python3 src/forward_paper_trading_v3.py
 
 ## Freeze V3 验证
 
-`src/factor_research_freeze_v3.py` 输出到 `output/factor_research_freeze_v3/`，固定 `v3_atr_risk_budget_hot5_vol_risk_on`，只做复跑和稳定性验证，不继续调参、不新增因子、不修改版本3规则。
+`research/factor_research_freeze_v3.py` 输出到 `output/factor_research_freeze_v3/`，固定 `v3_atr_risk_budget_hot5_vol_risk_on`，只做复跑和稳定性验证，不继续调参、不新增因子、不修改版本3规则。
 
 - `freeze_v3_strategy.json`：冻结规则配置，记录 alpha040 主排序、rps60/close_to_20d_high 辅助、积极环境开仓、5日涨幅和 volatility_20d 阈值、ATR 止损 + 风险预算仓位、趋势弱过滤、冲高回落标签边界。
 - `freeze_rerun_summary.csv` / `reproducibility_check.csv`：复跑 baseline、版本2、版本3，并与 Round6 结果比对。

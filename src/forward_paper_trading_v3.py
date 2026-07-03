@@ -22,10 +22,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR / "src") not in sys.path:
     sys.path.insert(0, str(ROOT_DIR / "src"))
 
-import factor_research as fr
-import factor_research_round3 as r3
-import factor_research_round6 as r6
 import market_scanner as scanner
+import quant_core as qc
 
 DEFAULT_FREEZE_CONFIG = Path("freeze_v3_strategy.json")
 DEFAULT_OUTPUT_DIR = Path("output/main_strategy_upgrade_v3/forward_paper_trading")
@@ -33,7 +31,7 @@ DEFAULT_OUTPUT_DIR = Path("output/main_strategy_upgrade_v3/forward_paper_trading
 
 def _safe_float(value: Any) -> Optional[float]:
     """安全转换 float。"""
-    return fr._safe_float(value)
+    return qc._safe_float(value)
 
 
 def _write_csv_append(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -87,7 +85,7 @@ def _select_frozen_v3_signals(
     signal_date: str,
 ) -> list[dict[str, Any]]:
     """选择冻结 v3 信号。"""
-    strategy = r6.ShadowStrategy(
+    strategy = qc.ShadowStrategy(
         key="v3_atr_risk_budget_hot5_vol_risk_on",
         label="Frozen v3 forward paper",
         stop_variant="atr_stop_risk_budget",
@@ -97,7 +95,7 @@ def _select_frozen_v3_signals(
     )
     market_profile = market_timeline.get(signal_date) or {}
     candidate_limit = int(market_profile.get("candidate_limit") or 5)
-    eligible, _ = r6._eligible_for_strategy(universe_by_date.get(signal_date, []), market_profile, strategy, thresholds)
+    eligible, _ = qc._eligible_for_strategy(universe_by_date.get(signal_date, []), market_profile, strategy, thresholds)
     return eligible[:candidate_limit]
 
 
@@ -105,7 +103,7 @@ def run_forward_paper_trading(
     *,
     freeze_config_path: Path = DEFAULT_FREEZE_CONFIG,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
-    cache_dir: Path = fr.DEFAULT_CACHE_DIR,
+    cache_dir: Path = qc.DEFAULT_CACHE_DIR,
     signal_date: Optional[str] = None,
     min_bars: int = 80,
     min_history: int = 60,
@@ -114,13 +112,13 @@ def run_forward_paper_trading(
     """记录冻结 v3 forward paper 信号。"""
     config = _load_freeze_config(freeze_config_path)
     scanner._set_active_config(scanner._load_scanner_config(strategy_path))
-    histories = fr.load_cached_histories(cache_dir=cache_dir, min_bars=min_bars)
-    metadata = r3._load_scan_metadata()
-    alpha040_map = r3._build_alpha040_map(histories)
-    universe_by_date, _ = r3._build_dynamic_universe(histories, metadata, alpha040_map, min_history, output_dir)
+    histories = qc.load_cached_histories(cache_dir=cache_dir, min_bars=min_bars)
+    metadata = qc._load_scan_metadata()
+    alpha040_map = qc._build_alpha040_map(histories)
+    universe_by_date, _ = qc._build_dynamic_universe(histories, metadata, alpha040_map, min_history, output_dir)
     selected_date = signal_date or _latest_signal_date(universe_by_date)
     thresholds = _freeze_thresholds(config)
-    market_timeline = r3._market_timeline()
+    market_timeline = qc._market_timeline()
     signals = _select_frozen_v3_signals(universe_by_date, market_timeline, thresholds, selected_date)
     rows: list[dict[str, Any]] = []
     for item in signals:
@@ -238,7 +236,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="记录冻结 v3 forward paper 信号")
     parser.add_argument("--freeze-config", default=str(DEFAULT_FREEZE_CONFIG), help="冻结策略配置路径")
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT_DIR), help="输出目录")
-    parser.add_argument("--cache-dir", default=str(fr.DEFAULT_CACHE_DIR), help="股票历史 K 缓存目录")
+    parser.add_argument("--cache-dir", default=str(qc.DEFAULT_CACHE_DIR), help="股票历史 K 缓存目录")
     parser.add_argument("--date", help="指定信号日期；默认取最新可用缓存日期")
     parser.add_argument("--strategy", default="strategy.json", help="策略配置文件")
     args = parser.parse_args()

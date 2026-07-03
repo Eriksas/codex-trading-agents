@@ -199,7 +199,7 @@ def _bars_to_panel(histories: dict[str, list[dict]]) -> pd.DataFrame:
                 vwap = turnover / volume
             rows.append(
                 {
-                    "date": pd.to_datetime(date),
+                    "date": str(date),
                     "symbol": symbol,
                     "open": _safe_float(bar.get("open")),
                     "high": _safe_float(bar.get("high")),
@@ -213,6 +213,8 @@ def _bars_to_panel(histories: dict[str, list[dict]]) -> pd.DataFrame:
     panel = pd.DataFrame(rows)
     if panel.empty:
         return panel
+    panel["date"] = pd.to_datetime(panel["date"], errors="coerce")
+    panel = panel[panel["date"].notna()]
     return panel.sort_values(["symbol", "date"]).reset_index(drop=True)
 
 

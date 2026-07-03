@@ -15,6 +15,39 @@
 - Hermes 策略管家：只读诊断、反方审查、影子实验草案和学习记忆，不直接修改主策略。
 - 多通道推送：支持飞书应用机器人、飞书 webhook、企业微信、Telegram、Slack、Discord、邮件等。
 
+## 项目结构
+
+2026-07-03 重构后，代码按「每日运行 / 研究 / 归档」三层隔离（详见 `docs/refactor_2026-07-03.md`）：
+
+```text
+├── main_v2.py                 # watchlist 每日报告入口
+├── src/                       # 每日运行核心（唯一被定时任务依赖的代码）
+│   ├── market_scanner.py      # 收盘扫描、模拟计划、台账、回测摘要
+│   ├── scheduled_v3_reporter.py   # V3 日报（飞书推送用）
+│   ├── forward_paper_trading_v3.py# 冻结 V3 forward paper 记录
+│   ├── quant_core.py          # 共享量化库（缓存读取/可交易性/股票池/V3 过滤）
+│   ├── data_fetcher / analyzer / reporter / notifier / synthesizer / selector
+│   └── reviewer / strategy_health / strategy_learning
+├── research/                  # 研究代码（已收敛，不在每日运行路径上）
+│   ├── factor_research*.py    # 因子研究 round1-6 与冻结验证（历史轮次，互相依赖）
+│   ├── backtest_v3_expanded.py / data_expansion_pipeline.py
+│   ├── setup_based_short_swing.py / automated_setup_review.py
+│   └── diagnose_* / short_horizon_* / strategy_discovery_shadow.py
+├── archive/                   # 弃用入口与旧策略实现（仅回滚/对照用）
+│   ├── market_scanner_legacy_v1.py
+│   └── main.py / main_native_task.py
+└── scripts/                   # shell 入口（推送、Hermes steward）
+```
+
+## 策略研究现状（重要）
+
+截至 2026-07-03 的诚实结论：**当前所有已验证策略在 2021-2026 长样本中均为负收益，项目尚未找到可用 alpha。**
+
+- 主策略 `alpha040_v3_risk_controlled` 长样本累计约 -9.89%（其价值在回撤控制，非收益）。
+- setup-based 三类事件策略与全部退出实验均未转正，已收敛归档。
+- 回测方法论经复核偏保守（次日触发进场、涨停禁买、跌停禁卖、双边费用滑点），负收益是真实研究结论，不是计算错误。
+- 因此本项目当前定位是**研究与模拟复盘框架**：继续 forward paper trading 积累样本，不应向策略输出投入真实资金。
+
 ## 快速开始
 
 建议使用 Python 3.12。当前 `pandas-ta` 0.4.x 在 PyPI 上要求 Python >= 3.12。
@@ -54,26 +87,21 @@ python3 src/market_scanner.py --push --push-dry-run
 python3 src/market_scanner.py --push
 ```
 
-因子研究与策略消融 shadow experiment：
+V3 日报与 forward paper trading（每日运行路径）：
 
 ```bash
-python3 src/factor_research.py
-python3 src/factor_research.py --max-symbols 300 --min-cross-section 30
-python3 src/factor_research_round2.py
-python3 src/factor_research_round3.py
-python3 src/factor_research_round4.py
-python3 src/factor_research_round5.py
-python3 src/factor_research_round6.py
-python3 src/factor_research_freeze_v3.py
+python3 src/scheduled_v3_reporter.py
 python3 src/forward_paper_trading_v3.py
 ```
 
-主策略升级审计与 V3 日报：
+研究模块（已收敛，仅在有新数据或新假设时重跑，不在每日路径上）：
 
 ```bash
-python3 src/main_strategy_upgrade_v3.py
-python3 src/scheduled_v3_reporter.py
-python3 src/backtest_v3_expanded.py
+python3 research/factor_research.py            # 因子 IC/分组/消融
+python3 research/factor_research_round6.py     # V3 shadow 策略对比
+python3 research/backtest_v3_expanded.py       # 2021 起扩展回测
+python3 research/data_expansion_pipeline.py    # 历史数据扩展
+python3 research/main_strategy_upgrade_v3.py   # 主策略升级审计
 ```
 
 Hermes 策略管家：

@@ -34,22 +34,33 @@
 ```
 Codex-trading-agents/
 ├── AGENTS.md              # 本文件（项目总配置）
+├── main_v2.py             # watchlist 每日报告入口
 ├── watchlist.json         # 自选股列表（修改标的只动这里）
+├── strategy.json          # 主策略与扫描配置
+├── freeze_v3_strategy.json# 冻结 V3 规则
 ├── requirements.txt       # Python 依赖
-├── src/
-│   ├── data_fetcher.py   # 数据抓取 agent 的工具函数
-│   ├── analyzer.py        # 分析 agent 的工具函数
-│   └── reporter.py        # 报告 agent 的工具函数
-├── prompts/
-│   ├── data_agent.md     # 数据抓取 sub-agent 的指令
-│   ├── analysis_agent.md # 分析 sub-agent 的指令
-│   └── report_agent.md   # 报告 sub-agent 的指令
-├── output/
-│   └── YYYY-MM-DD/       # 每日产出
+├── src/                   # 每日运行核心（定时任务只允许依赖这里）
+│   ├── market_scanner.py          # 收盘扫描、模拟计划、台账
+│   ├── scheduled_v3_reporter.py   # V3 日报
+│   ├── forward_paper_trading_v3.py# 冻结 V3 forward paper 记录
+│   ├── quant_core.py              # 共享量化库（缓存/可交易性/股票池/V3 过滤）
+│   ├── data_fetcher.py / analyzer.py / reporter.py / notifier.py
+│   └── reviewer.py / selector.py / synthesizer.py / strategy_health.py / strategy_learning.py
+├── research/              # 研究代码（已收敛；不得被 src/ 或定时任务导入）
+├── archive/               # 弃用入口与 legacy 策略（仅回滚/对照用）
+├── prompts/               # sub-agent 与 Hermes 指令
+├── scripts/               # shell 入口（推送、Hermes steward）
+├── output/YYYY-MM-DD/     # 每日产出
 ├── logs/                  # 运行日志
-└── docs/
-    └── sop.md            # AI 工作流 SOP（项目复盘，面试可展示）
+└── docs/                  # 文档（含 refactor_2026-07-03.md 重构说明）
 ```
+
+**分层约束（2026-07-03 重构确立）**：
+
+- `src/` 是唯一的每日运行层：GitHub Actions 与 shell 脚本只能调用 `src/` 和 `main_v2.py`。
+- `research/` 内的模块可以导入 `src/`，但 `src/` 不得反向导入 `research/`。
+- 运行路径需要的共享函数统一放 `src/quant_core.py`，不要再从研究轮次文件里 import。
+- 新研究实验放 `research/`，一次性诊断脚本也放 `research/`，不要放进 `src/`。
 
 ## Sub-agent 职责分工
 
@@ -174,3 +185,7 @@ Codex-trading-agents/
 - ❌ 声称收益确定、胜率确定或风险可控
 - ❌ 将本工作流产出对外传播为投资顾问服务
 - ❌ 连接实盘交易接口
+- ❌ ST/*ST 股票一概不碰（2026-07-03 用户明令）：扫描、候选、回测、forward paper
+  全链路剔除；回测应使用时变 ST 状态（BaoStock isST 日频序列），静态快照只能作过渡
+- ❌ 使用 fuyao 源指数数据（已证实 2022-2026 双向失真达 ±44%）；指数数据一律以
+  BaoStock 序列为准（`data/expanded/index_daily_baostock.csv`），失真原件已隔离备份

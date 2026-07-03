@@ -19,8 +19,9 @@ from typing import Any, Optional
 import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR / "src") not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR / "src"))
+for _dep_dir in (ROOT_DIR / "src", ROOT_DIR / "archive"):
+    if str(_dep_dir) not in sys.path:
+        sys.path.insert(0, str(_dep_dir))
 
 import factor_research as fr
 import factor_research_freeze_v3 as freeze
