@@ -64,6 +64,7 @@ def main() -> None:
 
     failures: list[dict] = []
     done = 0
+    consecutive_failures = 0
     skipped = 0
     for name in symbols:
         out_path = OUTPUT_DIR / name
@@ -95,17 +96,24 @@ def main() -> None:
                 writer.writerow(["date", "isST"])
                 writer.writerows(rows)
             done += 1
+            consecutive_failures = 0
             if done % 200 == 0:
                 logger.info("fetched %d (skipped %d, failed %d)", done, skipped, len(failures))
         except (_QueryTimeout, Exception) as exc:  # noqa: BLE001
             failures.append({"symbol": name, "code": code, "reason": str(exc)})
             logger.warning("fetch failed %s: %s", code, exc)
-            if isinstance(exc, _QueryTimeout):
-                try:
-                    bs.logout()
-                except Exception:  # noqa: BLE001
-                    pass
-                bs.login()
+            consecutive_failures += 1
+            try:
+                bs.logout()
+            except Exception:  # noqa: BLE001
+                pass
+            if consecutive_failures >= 200:
+                logger.error("连续失败 %d 次，中止本轮（数据源疑似不可用，稍后重跑续传）", consecutive_failures)
+                break
+            if consecutive_failures % 20 == 0:
+                logger.warning("连续失败 %d 次，休眠 60s 后重连", consecutive_failures)
+                time.sleep(60.0)
+            bs.login()
             time.sleep(1.0)
 
     bs.logout()

@@ -103,6 +103,27 @@ def load_panels(force_rebuild: bool = False) -> dict[str, Any]:
     st_codes = set(stock_basic.loc[stock_basic["is_st"] == True, "ts_code"])  # noqa: E712
     panels["st_mask"] = pd.Series([str(c) in st_codes for c in symbols], index=symbols)
 
+    # 时变 ST 面板（BaoStock isST 日频；硬规则"ST 一概不碰"按历史每日状态执行）
+    st_dir = EXPANDED_DIR / "baostock_st"
+    st_files = list(st_dir.glob("*.csv")) if st_dir.exists() else []
+    if len(st_files) / max(1, len(symbols)) >= 0.95:
+        st_daily = pd.DataFrame(False, index=panels["close"].index, columns=symbols)
+        for path in st_files:
+            code, market = path.stem.rsplit("_", 1)
+            ts_code = f"{code}.{market}"
+            if ts_code not in st_daily.columns:
+                continue
+            s = pd.read_csv(path)
+            flags = pd.to_numeric(s.set_index("date")["isST"], errors="coerce").fillna(0)
+            flags = flags.reindex(panels["close"].index).ffill().fillna(0)
+            st_daily[ts_code] = flags.astype(bool)
+        panels["st_daily"] = st_daily
+        logger.info("time-varying ST panel loaded: %d symbols, %d ST cells",
+                    len(st_files), int(st_daily.to_numpy().sum()))
+    else:
+        panels["st_daily"] = None
+        logger.warning("baostock_st coverage insufficient; fallback to static st_mask")
+
     panels["index_close"] = index_daily.pivot(index="trade_date", columns="ts_code", values="close")
 
     adj, source = _build_adj_factor(panels)
@@ -219,12 +240,15 @@ def build_market(panels: dict[str, Any]) -> Market:
     entry_blocked = (suspended | near_limit_up | corp_action).fillna(True)
     exit_blocked = (suspended | near_limit_down).fillna(True)
 
-    # universe：t 日收盘视角
+    # universe：t 日收盘视角；ST 剔除优先用时变面板（AGENTS.md 硬规则）
     history_ok = close.notna().cumsum() >= MIN_HISTORY_DAYS
     price_ok = close > MIN_PRICE
     amount_ok = amount >= MIN_AMOUNT
-    not_st = ~panels["st_mask"]
-    universe = (history_ok & price_ok & amount_ok & (~suspended)).mul(not_st, axis=1).fillna(False)
+    base = history_ok & price_ok & amount_ok & (~suspended)
+    if panels.get("st_daily") is not None:
+        universe = (base & (~panels["st_daily"])).fillna(False)
+    else:
+        universe = base.mul(~panels["st_mask"], axis=1).fillna(False)
 
     return Market(
         dates=close.index,
