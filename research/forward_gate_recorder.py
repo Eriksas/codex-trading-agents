@@ -23,7 +23,8 @@ import pandas as pd
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR / "research"))
 
-OUTPUT_DIR = ROOT_DIR / "output" / "forward_gate_recorder"
+# 状态入 git 跟踪目录：提交历史 = 前向记录的防篡改留痕（PROTOCOL_V1 不可改历史要求）
+OUTPUT_DIR = ROOT_DIR / "forward_state" / "gates"
 LEDGER = OUTPUT_DIR / "gate_states.csv"
 
 # 前向评估协议 v1（2026-07 冻结；Day250 后不得修改任何阈值，改则本轮评估作废）

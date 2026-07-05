@@ -26,13 +26,16 @@ from typing import Any, Optional
 import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = ROOT_DIR / "output" / "forward_paper_bounce"
-AMOUNTS_STORE = OUTPUT_DIR / "daily_amounts_store.csv"     # date, code, name, amount, close
+# 状态入 git 跟踪目录：提交历史 = 前向记录的防篡改留痕；
+# 成交额快照按日 gzip 存储并保留 40 天，避免仓库膨胀。
+OUTPUT_DIR = ROOT_DIR / "forward_state" / "bounce"
+AMOUNTS_DIR = OUTPUT_DIR / "amounts"                       # YYYY-MM-DD.csv.gz
 SIGNALS_LEDGER = OUTPUT_DIR / "signals_ledger.csv"
 EVENTS_LOG = OUTPUT_DIR / "events_log.csv"
 COST_BPS = 30.0
 HOLD_TRADING_DAYS = 5
 COOLDOWN_TRADING_DAYS = 5
+AMOUNTS_RETENTION_DAYS = 40
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -73,8 +76,57 @@ def _fetch_snapshot() -> pd.DataFrame:
     return snap
 
 
+def _latest_trading_date() -> str:
+    """BaoStock 查询最近交易日（节假日守卫）。"""
+    import baostock as bs
+
+    bs.login()
+    try:
+        rs = bs.query_history_k_data_plus(
+            "sh.000300", "date,close",
+            start_date=(datetime.now() - pd.Timedelta(days=20)).strftime("%Y-%m-%d"),
+            end_date=datetime.now().strftime("%Y-%m-%d"),
+            frequency="d", adjustflag="3",
+        )
+        rows = []
+        while rs.error_code == "0" and rs.next():
+            rows.append(rs.get_row_data())
+    finally:
+        bs.logout()
+    if not rows:
+        raise RuntimeError("无法获取最近交易日")
+    return rows[-1][0]
+
+
+def _amounts_trading_days() -> list[str]:
+    """滚动库中已有的交易日（按日文件名）。"""
+    if not AMOUNTS_DIR.exists():
+        return []
+    return sorted(p.name.replace(".csv.gz", "") for p in AMOUNTS_DIR.glob("*.csv.gz"))
+
+
+def _read_amounts_window(n: int = 20) -> pd.DataFrame:
+    """读取最近 n 个交易日的成交额快照。"""
+    days = _amounts_trading_days()[-n:]
+    frames = []
+    for d in days:
+        df = pd.read_csv(AMOUNTS_DIR / f"{d}.csv.gz", dtype={"code": str})
+        df.insert(0, "date", d)
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
 def cmd_update() -> None:
-    """拉取当日全市场快照，把成交额追加进滚动库（每交易日收盘后运行一次）。"""
+    """拉取当日全市场快照入滚动库（每交易日收盘后一次；节假日自动跳过）。"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    latest = _latest_trading_date()
+    if latest != today:
+        logger.info("今日 %s 非交易日（最近交易日 %s），跳过入库", today, latest)
+        return
+    out_path = AMOUNTS_DIR / f"{today}.csv.gz"
+    if out_path.exists():
+        logger.info("今日 %s 已入库，跳过（幂等）", today)
+        return
     snap = _fetch_snapshot()
     col_map = {}
     for want, cands in {
@@ -92,15 +144,12 @@ def cmd_update() -> None:
     df["close"] = pd.to_numeric(df["close"], errors="coerce")
     df = df.dropna(subset=["amount"])
     df = df[df["amount"] > 0]
-    today = datetime.now().strftime("%Y-%m-%d")
-    store = _read_csv(AMOUNTS_STORE)
-    if not store.empty and (store["date"] == today).any():
-        logger.info("今日 %s 已入库，跳过（幂等）", today)
-        return
-    df.insert(0, "date", today)
-    _append_csv(AMOUNTS_STORE, df)
-    logger.info("入库 %s：%d 只（滚动库现有 %d 个交易日）", today, len(df),
-                store["date"].nunique() + 1 if not store.empty else 1)
+    AMOUNTS_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False, encoding="utf-8", compression="gzip")
+    # 保留期裁剪
+    for d in _amounts_trading_days()[:-AMOUNTS_RETENTION_DAYS]:
+        (AMOUNTS_DIR / f"{d}.csv.gz").unlink(missing_ok=True)
+    logger.info("入库 %s：%d 只（滚动库 %d 个交易日）", today, len(df), len(_amounts_trading_days()))
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +201,7 @@ def _cooldown_active(signal_date: str) -> bool:
     if ledger.empty:
         return False
     last = str(ledger["signal_date"].max())
-    store = _read_csv(AMOUNTS_STORE)
-    trading_days = sorted(store["date"].unique()) if not store.empty else []
+    trading_days = _amounts_trading_days()
     if last in trading_days and signal_date in trading_days:
         gap = trading_days.index(signal_date) - trading_days.index(last)
         return gap <= COOLDOWN_TRADING_DAYS
@@ -164,14 +212,12 @@ def _cooldown_active(signal_date: str) -> bool:
 
 def _pick_candidates(signal_date: str) -> pd.DataFrame:
     """按 ADV20 排名 300-1500 区间选 10 只（非 ST、价格>=3）。"""
-    store = _read_csv(AMOUNTS_STORE)
-    if store.empty:
+    sub = _read_amounts_window(20)
+    if sub.empty:
         raise RuntimeError("成交额滚动库为空：请先每日运行 update 模式积累至少 20 个交易日。")
-    days = sorted(store["date"].unique())
-    window = days[-20:]
+    window = sorted(sub["date"].unique())
     if len(window) < 20:
         logger.warning("滚动库仅 %d 个交易日（<20），ADV 用现有窗口近似并在台账标注", len(window))
-    sub = store[store["date"].isin(window)]
     adv = sub.groupby(["code", "name"], as_index=False).agg(
         adv=("amount", "mean"), days=("amount", "count"), last_close=("close", "last"))
     adv = adv[adv["days"] >= max(10, len(window) // 2)]
