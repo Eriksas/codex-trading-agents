@@ -25,6 +25,23 @@ sys.path.insert(0, str(ROOT_DIR / "research"))
 
 OUTPUT_DIR = ROOT_DIR / "output" / "forward_gate_recorder"
 LEDGER = OUTPUT_DIR / "gate_states.csv"
+
+# 前向评估协议 v1（2026-07 冻结；Day250 后不得修改任何阈值，改则本轮评估作废）
+# 依据 docs/hermes_critic_framework_2026-07.md §4 草案，启动前固化。
+PROTOCOL_V1 = {
+    "comparators": ["g0_full_b2", "g6_fixed25_b2"],   # 满仓对照 + 固定25%零模型
+    "checkpoints": {
+        "day60": {"purpose": "诊断", "halt_if": "avg_exposure<5% 持续>=30天"},
+        "day120": {"purpose": "早停", "halt_if": "calmar<-0.5 or max_dd<-15%"},
+        "day250": {
+            "purpose": "主决策",
+            "pass_if": "calmar > calmar(g0) AND bootstrap80CI(excess).lower > -2% "
+                       "AND max_dd <= 0.8*max_dd(g0) AND 显著性经双框架Bonferroni校正",
+        },
+        "day500": {"purpose": "确认", "fail_action": "标记假阳性并回滚候选"},
+    },
+    "no_tuning": "样本期内禁止修改 G2/G4 规则参数；修改即重置计数",
+}
 INDEX_SET = {"000001.SH": "sh.000001", "399001.SZ": "sz.399001", "399006.SZ": "sz.399006",
              "000300.SH": "sh.000300", "000905.SH": "sh.000905", "000852.SH": "sh.000852"}
 BENCH = "000300.SH"
