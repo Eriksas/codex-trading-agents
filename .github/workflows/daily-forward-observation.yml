@@ -22,6 +22,8 @@ jobs:
   observe:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TZ: Asia/Shanghai   # 脚本用本地时间做交易日判断，固定为北京时间
     steps:
       - name: Checkout
         uses: actions/checkout@v4
