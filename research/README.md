@@ -35,9 +35,11 @@
 python3 research/forward_paper_bounce.py update   # 成交额入滚动库（ADV20 基础）
 python3 research/forward_paper_bounce.py check    # 触发判定，触发则记录候选
 python3 research/forward_paper_bounce.py settle   # 有未结算持仓时补进出场价
+python3 research/forward_gate_recorder.py         # G2/G4 框架目标暴露留痕
 ```
 
-纪律：不满 20 次事件不做统计结论、不调参。台账在 `output/forward_paper_bounce/`。
+纪律：bounce 不满 20 次事件、gate 不满 120 个交易日，不做统计结论、不调参。
+台账在 `output/forward_paper_bounce/` 与 `output/forward_gate_recorder/`。
 
 ## 2026-07 搜索轮结论摘要
 

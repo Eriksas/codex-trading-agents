@@ -146,6 +146,27 @@ def main() -> None:
     assert len(res.trades) == 0, res.trades
     print("T6 corp-action-day entry block OK")
 
+    # T7 半仓数学：目标暴露维持 0.5（水平序列语义），A 信号行2 → 净值变化 = 0.5×单笔净收益
+    expo = np.full(len(DATES), 0.5)
+    res = pb.run_strategy(market, _sig_only(market, "000010.SZ", 2), name="t7",
+                          start=DATES[0], end=DATES[-1], top_k=1, hold_days=2,
+                          n_tranches=1, cost_bps=cost, exposure_series=expo)
+    a_open = panels["open"]["000010.SZ"]
+    trade_ret = a_open.iloc[5] / a_open.iloc[3] - 1 - cost / 10000
+    final = res.daily_equity.iloc[-1]
+    assert abs(final - (1 + 0.5 * trade_ret)) < 1e-9, (final, 1 + 0.5 * trade_ret)
+    print(f"T7 fractional exposure OK: equity {final:.6f} == 1+0.5×{trade_ret:.6f}")
+
+    # T8 崩塌硬切：行2 全仓开仓（hold=8 应持到行11），行4 目标暴露归零 → 行5 开盘强制清仓
+    expo = np.ones(len(DATES)); expo[4:] = 0.0
+    res = pb.run_strategy(market, _sig_only(market, "000010.SZ", 2), name="t8",
+                          start=DATES[0], end=DATES[-1], top_k=1, hold_days=8,
+                          n_tranches=1, cost_bps=cost, exposure_series=expo)
+    tr = res.trades[0]
+    assert tr.exit_date == DATES[5], tr.exit_date
+    assert res.stats["hard_cut_liquidations"] == 1
+    print("T8 hard risk-off liquidation OK (exit at", tr.exit_date, ")")
+
     print("ALL-TESTS-PASSED")
 
 

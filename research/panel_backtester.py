@@ -319,6 +319,7 @@ def run_strategy(
     entry_stride: int = 1,
     cost_bps: float = DEFAULT_COST_BPS_ROUNDTRIP,
     regime_on: Optional[np.ndarray] = None,
+    exposure_series: Optional[np.ndarray] = None,
     min_candidates: int = 1,
 ) -> BacktestResult:
     """分批持仓组合回测，支持三种模式：
@@ -331,6 +332,10 @@ def run_strategy(
         signal: [date x symbol]，行 t 只含 t 日收盘及之前信息；值越大越优先，
             NaN 表示该股当日无信号（事件型策略在非事件日整行 NaN）。
         regime_on: [date] bool，t 日收盘时点的环境开关；关闭时不开新仓。
+        exposure_series: [date] float 0..1，目标暴露（给定时忽略 regime_on）。
+            批次开仓时锁定权重 w=exposure_series[t]，持有期内不变（组合层
+            聚合暴露以约 hold/2 天滞后跟踪目标）；目标 ≤0.01 时全部批次
+            于次日开盘强制清仓（崩塌硬切）。
 
     执行细节：
         信号日 t → t+1 开盘买入（entry_blocked 剔除）→ t+1+hold_days 开盘卖出，
@@ -352,7 +357,9 @@ def run_strategy(
     open_positions: list[Optional[list[tuple[int, float, int]]]] = [None] * n_tranches
     tranche_exit_at: list[Optional[int]] = [None] * n_tranches
     tranche_locked_until: list[int] = [0] * n_tranches  # 顺延卖出后资金锁定期
+    tranche_weight: list[float] = [1.0] * n_tranches     # 批次开仓时锁定的暴露权重
     exposure_acc: list[float] = []
+    hard_cuts = 0
 
     step = 0
     for t in idx_range:
@@ -360,10 +367,17 @@ def run_strategy(
         if entry_i >= n_dates:
             break
 
+        # 0) 崩塌硬切：目标暴露归零时，全部批次于 entry_i 开盘强制清仓
+        hard_cut_now = exposure_series is not None and float(exposure_series[t]) <= 0.01
+
         # 1) 所有到期批次平仓（在 entry_i 开盘）
         for j in range(n_tranches):
-            if open_positions[j] is None or tranche_exit_at[j] is None or entry_i < tranche_exit_at[j]:
+            if open_positions[j] is None or tranche_exit_at[j] is None:
                 continue
+            if entry_i < tranche_exit_at[j] and not hard_cut_now:
+                continue
+            if hard_cut_now and entry_i < tranche_exit_at[j]:
+                hard_cuts += 1
             batch = open_positions[j]
             rets = []
             max_exit = entry_i
@@ -395,18 +409,19 @@ def run_strategy(
                     corp_action_days=ca_days,
                 ))
             if rets:
-                tranche_equity[j] *= 1.0 + float(np.mean(rets))
+                tranche_equity[j] *= 1.0 + tranche_weight[j] * float(np.mean(rets))
             open_positions[j] = None
             tranche_exit_at[j] = None
             if max_exit > entry_i:
                 tranche_locked_until[j] = max_exit + 1  # 资金实际晚回笼
 
         # 2) 开新仓：仅在 stride 对齐日；事件型（stride=1）任意空仓日均可
-        if step % entry_stride == 0 or entry_stride == 1:
+        target_w = float(exposure_series[t]) if exposure_series is not None else 1.0
+        if (step % entry_stride == 0 or entry_stride == 1) and target_w > 0.01:
             free = [j for j in range(n_tranches) if open_positions[j] is None and tranche_locked_until[j] <= entry_i]
             if free:
                 j = free[0]
-                if regime_on is not None and not bool(regime_on[t]):
+                if exposure_series is None and regime_on is not None and not bool(regime_on[t]):
                     pass  # 环境关闭：持币
                 else:
                     eligible = market.universe[t] & (~market.entry_blocked[entry_i]) & np.isfinite(signal[t])
@@ -426,10 +441,11 @@ def run_strategy(
                         if batch:
                             open_positions[j] = batch
                             tranche_exit_at[j] = entry_i + hold_days
+                            tranche_weight[j] = target_w
                     else:
                         no_candidate_days += 1
 
-        # 3) 逐日盯市（用复权收盘估值）
+        # 3) 逐日盯市（用复权收盘估值；批次内 w 投资 + (1-w) 持币）
         total = 0.0
         invested = 0.0
         for j in range(n_tranches):
@@ -442,10 +458,15 @@ def run_strategy(
                     mark = market.adj_close[t, sym_idx]
                     if not np.isfinite(mark) and ei <= t:
                         mark = entry_px
+                    w = tranche_weight[j]
                     vals.append(mark / entry_px if ei <= t else 1.0)
-                part = tranche_equity[j] * float(np.mean(vals)) if vals else tranche_equity[j]
-                total += part
-                invested += part
+                if vals:
+                    w = tranche_weight[j]
+                    part = tranche_equity[j] * (w * float(np.mean(vals)) + (1.0 - w))
+                    total += part
+                    invested += tranche_equity[j] * w * float(np.mean(vals))
+                else:
+                    total += tranche_equity[j]
         equity_curve[str(dates[t])] = total
         exposure_acc.append(invested / total if total > 0 else 0.0)
         step += 1
@@ -462,11 +483,12 @@ def run_strategy(
             if np.isfinite(mark) and entry_px > 0:
                 rets.append(mark / entry_px - 1 - cost_bps / 10000.0)
         if rets:
-            tranche_equity[j] *= 1.0 + float(np.mean(rets))
+            tranche_equity[j] *= 1.0 + tranche_weight[j] * float(np.mean(rets))
 
     equity = pd.Series(equity_curve, dtype="float64")
     stats = _compute_stats(equity, trades, blocked_entries, no_candidate_days)
     stats["avg_exposure"] = round(float(np.mean(exposure_acc)), 4) if exposure_acc else 0.0
+    stats["hard_cut_liquidations"] = hard_cuts
     return BacktestResult(name=name, daily_equity=equity, trades=trades, stats=stats)
 
 
