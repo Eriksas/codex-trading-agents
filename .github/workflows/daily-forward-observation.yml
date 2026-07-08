@@ -48,6 +48,44 @@ jobs:
         run: |
           python research/forward_gate_recorder.py || echo "::warning::gate recorder failed"
 
+      - name: Notify on bounce trigger (Feishu)
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
+        run: |
+          python - <<'EOF'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          log = Path("forward_state/bounce/events_log.csv")
+          if not log.exists():
+              raise SystemExit(0)
+          ev = pd.read_csv(log, encoding="utf-8-sig").iloc[-1]
+          if not bool(ev.get("fired")):
+              raise SystemExit(0)
+          ledger = pd.read_csv("forward_state/bounce/signals_ledger.csv", encoding="utf-8-sig")
+          picks = ledger[ledger["signal_date"] == ev["date"]]
+          lines = [
+              "# 恐慌反弹事件触发（forward paper，仅模拟记录）",
+              "",
+              f"- 信号日：{ev['date']}（中证1000 ret5={ev['ret5']:.2%}，ret60={ev['ret60']:.2%}）",
+              f"- 候选 {len(picks)} 只（次日开盘模拟买入，持有5个交易日）：",
+              "",
+          ] + [f"- {r['name']} {r['code']}" for _, r in picks.iterrows()] + [
+              "",
+              "本消息为个人模拟观察提醒，不构成投资建议；执行前需人工复核。",
+          ]
+          Path("/tmp/forward_alert.md").write_text("\n".join(lines), encoding="utf-8")
+          print("alert prepared")
+          EOF
+          if [ -f /tmp/forward_alert.md ]; then
+            PYTHONPATH=src python -m notifier --report /tmp/forward_alert.md --mode full || echo "::warning::feishu notify failed"
+          fi
+
       - name: Commit forward state
         run: |
           git config user.name "forward-observer[bot]"

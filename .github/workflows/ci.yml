@@ -29,6 +29,11 @@ jobs:
         run: |
           python -m py_compile $(git ls-files '*.py')
 
+      - name: Backtester engine fixture tests
+        run: |
+          pip install --quiet pandas numpy
+          python research/test_panel_backtester.py
+
       - name: Check shell syntax
         run: |
           bash -n scripts/*.sh
