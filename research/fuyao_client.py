@@ -131,6 +131,19 @@ def trading_days() -> Any:
     return get("/api/a-share/calendar/trading-days")
 
 
+# --- 全市场 Parquet 导出（预签名下载链接）---
+
+def dump_download_url(kind: str) -> Any:
+    """kind: daily-k（10年全量）| daily-k-10d（近10交易日增量）| adjustment-factors。
+
+    已验证（2026-07-08）：10y 日K 1,013 万行 5,523 只 2016~今日、茅台已知值命中，
+    但不含退市股（幸存者补丁仍走 BaoStock）；复权因子事件流与 BaoStock hfq
+    跳变对账偏差 0.00036%。数据落地目录：data/expanded/fuyao_dumps/。
+    """
+    assert kind in ("daily-k", "daily-k-10d", "adjustment-factors"), kind
+    return get(f"/api/dump/market-dumps/{kind}/download-url", {})
+
+
 def smoke() -> None:
     """逐端点冒烟：打印可用性与样本字段。"""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
