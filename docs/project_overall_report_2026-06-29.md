@@ -1,3 +1,6 @@
+> ⚠️ **本报告已过时**：其中 V3 与扩展回测数字基于后被证实失真的指数数据。
+> 现行版本见 `docs/project_overall_report_2026-07-08.md`；翻案依据见 `docs/v3_reaudit_2026-07-03.md`。
+
 # Codex Trading Agents 项目整体报告
 
 生成日期：2026-06-29  
