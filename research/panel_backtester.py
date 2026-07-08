@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pickle
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,8 +29,10 @@ import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 EXPANDED_DIR = ROOT_DIR / "data" / "expanded"
-PANEL_CACHE = EXPANDED_DIR / "panel_cache_v1.pkl"
+# PANEL_CACHE 可用环境变量切换（v2 = fuyao dump 2016-2026 数据栈，见 build_panel_v2.py）
+PANEL_CACHE = Path(os.environ.get("PANEL_CACHE", str(EXPANDED_DIR / "panel_cache_v1.pkl")))
 BAOSTOCK_HFQ_DIR = EXPANDED_DIR / "baostock_hfq"
+CHINEXT_20PCT_SINCE = "2020-08-24"  # 创业板注册制改革：涨跌停 10% → 20%
 
 logger = logging.getLogger(__name__)
 
@@ -229,14 +232,24 @@ def build_market(panels: dict[str, Any]) -> Market:
     adj_ret = adj_close / adj_close.shift(1) - 1
 
     raw_ret = close / prev_close - 1
-    corp_action = raw_ret.abs().gt(limit + LIMIT_TOL, axis=1)
+
+    # 时变涨跌停：创业板(300/301) 2020-08-24 前为 10%（注册制改革后 20%）
+    limit_df = pd.DataFrame(
+        np.broadcast_to(limit.to_numpy(dtype="float64"), close.shape).copy(),
+        index=close.index, columns=close.columns)
+    chinext = [c for c in close.columns if str(c)[:3] in ("300", "301")]
+    pre_reform = close.index < CHINEXT_20PCT_SINCE
+    if chinext and pre_reform.any():
+        limit_df.loc[pre_reform, chinext] = 0.10
+
+    corp_action = raw_ret.abs() > (limit_df + LIMIT_TOL)
 
     suspended = vol.isna() | (vol <= 0) | close.isna() | open_.isna()
 
     # 开盘涨停无法买入 / 开盘跌停无法卖出（近似：开盘价进入距离限价 1% 以内）
     open_gap = open_ / prev_close - 1
-    near_limit_up = open_gap.ge(limit.astype("float64") - ENTRY_LIMIT_BUFFER, axis=1)
-    near_limit_down = open_gap.le(-(limit.astype("float64") - ENTRY_LIMIT_BUFFER), axis=1)
+    near_limit_up = open_gap >= (limit_df - ENTRY_LIMIT_BUFFER)
+    near_limit_down = open_gap <= -(limit_df - ENTRY_LIMIT_BUFFER)
     entry_blocked = (suspended | near_limit_up | corp_action).fillna(True)
     exit_blocked = (suspended | near_limit_down).fillna(True)
 

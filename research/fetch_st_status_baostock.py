@@ -22,9 +22,9 @@ from pathlib import Path
 import baostock as bs
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = ROOT_DIR / "data" / "expanded" / "baostock_st"
+OUTPUT_DIR = ROOT_DIR / "data" / "expanded" / "baostock_st_2016"
 KLINE_DIR = ROOT_DIR / "data" / "expanded" / "daily_kline"
-START_DATE = "2021-01-01"
+START_DATE = "2016-01-01"
 END_DATE = "2026-06-30"
 QUERY_TIMEOUT_SECONDS = 60
 

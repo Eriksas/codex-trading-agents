@@ -35,6 +35,10 @@ SPLITS = {
     "train": ("2021-01-04", "2023-12-29"),
     "validation": ("2024-01-02", "2025-06-30"),
     "holdout": ("2025-07-01", "2026-06-26"),
+    # 加长复检段（需 PANEL_CACHE=panel_cache_v2.pkl）：候选规则冻结时从未见过
+    # 这段数据 → 对冻结候选构成真样本外。注意 2016-2020 幸存者偏差更重、
+    # 换手率特征缺失（依赖 turnover 的信号不可测）。
+    "extended2016": ("2016-07-08", "2020-12-31"),
 }
 DEFAULT_OUTPUT = pb.ROOT_DIR / "output" / "strategy_search_202607"
 
