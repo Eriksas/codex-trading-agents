@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip --quiet
-          pip install --quiet pandas numpy baostock efinance akshare
+          pip install --quiet pandas numpy pyarrow baostock efinance akshare
 
       - name: Bounce paper trading (update / check / settle)
         run: |

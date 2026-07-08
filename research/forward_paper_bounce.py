@@ -116,8 +116,60 @@ def _read_amounts_window(n: int = 20) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+def _update_from_fuyao_dump() -> int:
+    """主路径：fuyao 10日增量 Parquet（预签名直下，约1MB）。
+
+    写入 dump 中所有缺失的交易日 → GH cron 漂移/漏跑的缺口自动回补。
+    依赖 pyarrow；股票名从 stock_basic 快照补（新股缺名不影响 ST 过滤：新股无 ST）。
+    返回新写入的天数。
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT_DIR / "research"))
+    import fuyao_client as fc
+
+    info = fc.dump_download_url("daily-k-10d")
+    import requests as _rq
+    raw = _rq.get(info["presigned_url"], timeout=60).content
+    import io
+    df = pd.read_parquet(io.BytesIO(raw), columns=["thscode", "date_ms", "close_price", "turnover"])
+    df["date"] = (pd.to_datetime(df["date_ms"], unit="ms", utc=True)
+                  .dt.tz_convert("Asia/Shanghai").dt.strftime("%Y-%m-%d"))
+    df["code"] = df["thscode"].str.split(".").str[0]
+    basic = ROOT_DIR / "data" / "expanded" / "stock_basic.csv"
+    names = {}
+    if basic.exists():
+        nb = pd.read_csv(basic, usecols=["ts_code", "name"])
+        names = dict(zip(nb["ts_code"].str.split(".").str[0], nb["name"]))
+    AMOUNTS_DIR.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for d, sub in df.groupby("date"):
+        out_path = AMOUNTS_DIR / f"{d}.csv.gz"
+        if out_path.exists():
+            continue
+        out = pd.DataFrame({
+            "code": sub["code"],
+            "name": sub["code"].map(names).fillna(sub["code"]),
+            "amount": pd.to_numeric(sub["turnover"], errors="coerce"),
+            "close": pd.to_numeric(sub["close_price"], errors="coerce"),
+        }).dropna(subset=["amount"])
+        out = out[out["amount"] > 0]
+        out.to_csv(out_path, index=False, encoding="utf-8", compression="gzip")
+        written += 1
+        logger.info("dump 入库 %s：%d 只", d, len(out))
+    for d in _amounts_trading_days()[:-AMOUNTS_RETENTION_DAYS]:
+        (AMOUNTS_DIR / f"{d}.csv.gz").unlink(missing_ok=True)
+    return written
+
+
 def cmd_update() -> None:
-    """拉取当日全市场快照入滚动库（每交易日收盘后一次；节假日自动跳过）。"""
+    """成交额入滚动库：主路径 fuyao 10日 dump（自动回补缺口），备路径当日快照。"""
+    try:
+        written = _update_from_fuyao_dump()
+        logger.info("fuyao dump 更新完成：新增 %d 天（滚动库 %d 个交易日）",
+                    written, len(_amounts_trading_days()))
+        return
+    except Exception as exc:  # noqa: BLE001 - 主路径失败则回退快照
+        logger.warning("fuyao dump 更新失败（%s），回退当日快照", str(exc)[:80])
     today = datetime.now().strftime("%Y-%m-%d")
     latest = _latest_trading_date()
     if latest != today:
