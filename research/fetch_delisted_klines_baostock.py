@@ -24,9 +24,9 @@ import baostock as bs
 import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = ROOT_DIR / "data" / "expanded" / "baostock_delisted"
+OUTPUT_DIR = ROOT_DIR / "data" / "expanded" / "baostock_delisted_2016"
 STOCK_BASIC = ROOT_DIR / "data" / "expanded" / "stock_basic.csv"
-START_DATE = "2021-01-01"
+START_DATE = "2016-01-01"
 QUERY_TIMEOUT_SECONDS = 60
 
 logging.basicConfig(
@@ -52,7 +52,7 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     basic = pd.read_csv(STOCK_BASIC)
     delisted = basic[basic["delist_date"].notna()].copy()
-    delisted = delisted[delisted["delist_date"] >= "2021-01-04"]
+    delisted = delisted[delisted["delist_date"] >= "2016-07-08"]
     logger.info("2021 后退市股票：%d 只", len(delisted))
 
     lg = bs.login()

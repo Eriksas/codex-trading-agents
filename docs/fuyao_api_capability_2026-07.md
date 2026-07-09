@@ -11,9 +11,18 @@
 | 全市场导出 | docs/api-reference/market-dumps：10年日K + 复权因子 Parquet 直下 | 未测 | **数据刷新主路径**（现有面板冻结在 2026-06-26）+ 复权因子第二来源交叉验证 |
 | 复权因子事件流 | corporate-actions（分红/送股/配股） | 未测 | 精确解决分红漏损（现用 BaoStock hfq 反推） |
 | 财务三表+指标 | financials / financial-indicators（成长/盈利/偿债/营运/现金流五类） | 未测 | **基本面解锁**：长期反转的价值陷阱过滤、质量因子 |
-| 涨停池/连板天梯 | special-data/limit-up-pool, limit-up-ladder | **✓ 2024-01 历史可查** | 连板高度=市场温度计（体制信号新候选）；涨停生态信号 |
-| 同花顺热榜 | hot-stock-list(-history), hot-stock-rank-trend | 端点在，1003 待解 | **差异化数据**：散户注意力时间序列 → 注意力反转/拥挤度信号 |
-| 龙虎榜 | dragon-tiger-list（全部/机构/游资） | 端点在，1003 待解 | 席位行为后验收益 |
+| 涨停池/连板天梯 | special-data/limit-up-pool, limit-up-ladder | **⚠ 仅当日快照**（见下） | 前向记录用；池字段极富（连板数/封单/封板时间/题材） |
+| 同花顺热榜 | hot-stock-list(-history), hot-stock-rank-trend | **⚠ 仅当日快照**（见下） | 前向记录用 |
+| 龙虎榜 | dragon-tiger-list（全部/机构/游资） | 端点在，历史性同疑 | 前向记录用 |
+
+**⚠ 快照陷阱（2026-07-09 实锤，修正本文此前错误结论）**：特色数据端点的
+`date` 参数被**完全无视**——任何日期（含 2016/2019/2023）返回同一份最新快照，
+且 code=0 不报错（hot-history 仅对超一年日期做格式校验，同样不按日期查询）。
+此前「2024-01 历史可查」的记录是错误的（只验了 code=0 未验内容差异）。
+**结论：fuyao 特色数据只能做前向逐日积累，无历史可回测。**
+涨停生态的历史已改由自有面板推导（`research/thermometer_study.py`，
+2016-2026 十年全量，描述性结论：与前瞻指数收益仅微弱非线性关联——
+极端连板→小盘 20 日 -1.31%（Q5）、跌停潮→反弹倾向，均不足以构成规则）。
 | 个股异动原因 | anomaly-analysis | 未测 | 事件标注 |
 | 同花顺指数/板块 | ths-index catalog/constituents | 未测 | 概念/行业轮动的成分数据 |
 | 交易日历 | calendar | 未测 | 替代 BaoStock 日历调用 |

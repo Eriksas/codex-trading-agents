@@ -44,9 +44,15 @@ jobs:
           python research/forward_paper_bounce.py check   || echo "::warning::bounce check failed"
           python research/forward_paper_bounce.py settle  || echo "::warning::bounce settle failed"
 
-      - name: Gate state recorder (G2/G4)
+      - name: Gate state recorder (G2/G3/G4)
         run: |
           python research/forward_gate_recorder.py || echo "::warning::gate recorder failed"
+
+      - name: Thermometer recorder (limit-up ecology)
+        env:
+          FUYAO_API_KEY: ${{ secrets.FUYAO_API_KEY }}
+        run: |
+          python research/forward_thermometer_recorder.py || echo "::warning::thermometer recorder failed"
 
       - name: Notify on bounce trigger (Feishu)
         env:
