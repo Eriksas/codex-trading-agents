@@ -54,6 +54,10 @@ jobs:
         run: |
           python research/forward_thermometer_recorder.py || echo "::warning::thermometer recorder failed"
 
+      - name: CB double-low recorder
+        run: |
+          python research/forward_cb_recorder.py || echo "::warning::cb recorder failed"
+
       - name: Notify on bounce trigger (Feishu)
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
