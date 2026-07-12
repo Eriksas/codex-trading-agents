@@ -1,9 +1,11 @@
 """
 forward_cb_recorder.py - 可转债双低每日前向记录（paper only）
 
-历史复检判决（docs/cb_double_low_verdict_2026-07-12.md）：四段累计全正但
-2021-23 段 MDD -22.6% 超预注册线 → 按协议存档不晋级。本记录器为纯数据
-收集：每日记录双低前 15 名单与强赎快照，为将来任何评估积累不可篡改证据。
+历史复检判决（docs/cb_double_low_verdict_2026-07-12.md）：按协议存档不晋级；
+用户决定不做转债（2026-07-12）。本记录器降级为**主板信用温度计观察变量**：
+转债发行人多为中小盘主板公司，低价券数量与双低中位数反映其信用压力
+（2023H2 低价券恐慌与小盘股压力同源）。每日仍记录双低前 15 与全表快照，
+纯研究观察，不构成任何交易线。
 
 数据源：集思录强赎表（ak.bond_cb_redeem_jsl，含现价/转股价/正股价/
 剩余规模/强赎状态）；溢价率自算 = 现价 ÷ (正股价/转股价×100) - 1。
@@ -62,6 +64,9 @@ def main() -> None:
     top.insert(1, "rank", range(1, len(top) + 1))
     top["recorded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     top["note"] = "paper only; no order; no tuning"
+    # 主板信用温度计指标（全表口径，随行留档）
+    top["cb_below_100_n"] = int((d.loc[ok, "现价"] < 100).sum())
+    top["cb_dlow_median"] = round(float(d.loc[ok, "双低"].median()), 1)
 
     out = pd.concat([prev, top], ignore_index=True)
     out.to_csv(LEDGER, index=False, encoding="utf-8-sig")
