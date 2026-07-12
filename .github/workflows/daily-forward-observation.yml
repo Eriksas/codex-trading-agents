@@ -77,6 +77,19 @@ jobs:
             PYTHONPATH=src python -m notifier --report /tmp/forward_health_alert.md --mode full || true
           fi
 
+      - name: Daily detailed report to Feishu
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
+        run: |
+          python research/forward_daily_report.py > /dev/null || echo "::warning::report generation failed"
+          if [ -f /tmp/forward_daily_report.md ]; then
+            PYTHONPATH=src python -m notifier --report /tmp/forward_daily_report.md --mode full || echo "::warning::feishu report push failed"
+          fi
+
       - name: Notify on bounce trigger (Feishu)
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}

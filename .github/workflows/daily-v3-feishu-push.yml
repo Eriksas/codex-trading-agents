@@ -58,7 +58,7 @@ jobs:
       FEISHU_RECEIVE_ID_TYPE: ${{ vars.FEISHU_RECEIVE_ID_TYPE || 'chat_id' }}
       FEISHU_APP_MESSAGE_FORMAT: ${{ vars.FEISHU_APP_MESSAGE_FORMAT || 'post' }}
       FEISHU_WEBHOOK_MESSAGE_FORMAT: ${{ vars.FEISHU_WEBHOOK_MESSAGE_FORMAT || 'post' }}
-      PUSH_MODE: ${{ github.event.inputs.push_mode || 'digest' }}
+      PUSH_MODE: ${{ github.event.inputs.push_mode || 'full' }}
       PUSH_DRY_RUN: ${{ github.event.inputs.push_dry_run || 'false' }}
       RUN_MARKET_SCAN: ${{ github.event.inputs.run_market_scan || 'true' }}
       RUN_FORWARD_PAPER: ${{ github.event.inputs.run_forward_paper || 'true' }}
