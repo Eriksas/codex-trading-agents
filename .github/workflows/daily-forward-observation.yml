@@ -58,6 +58,25 @@ jobs:
         run: |
           python research/forward_cb_recorder.py || echo "::warning::cb recorder failed"
 
+      - name: Dividend low-vol quarterly recorder
+        env:
+          FUYAO_API_KEY: ${{ secrets.FUYAO_API_KEY }}
+        run: |
+          python research/forward_divlv_recorder.py || echo "::warning::divlv recorder failed"
+
+      - name: Forward health check (alerts via Feishu on problems)
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
+        run: |
+          if ! python research/forward_health_check.py; then
+            echo "::warning::forward health check found problems"
+            PYTHONPATH=src python -m notifier --report /tmp/forward_health_alert.md --mode full || true
+          fi
+
       - name: Notify on bounce trigger (Feishu)
         env:
           FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}

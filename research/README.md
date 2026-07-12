@@ -31,15 +31,20 @@
 
 每交易日收盘后（15:30 后，本地运行；夜间东财接口不稳）：
 
+GitHub Actions 每交易日自动运行全套（19:40 + 21:30 幂等重试），本地补跑同命令：
+
 ```bash
-python3 research/forward_paper_bounce.py update   # 成交额入滚动库（ADV20 基础）
-python3 research/forward_paper_bounce.py check    # 触发判定，触发则记录候选
-python3 research/forward_paper_bounce.py settle   # 有未结算持仓时补进出场价
-python3 research/forward_gate_recorder.py         # G2/G4 框架目标暴露留痕
+python3 research/forward_paper_bounce.py update && python3 research/forward_paper_bounce.py check
+python3 research/forward_paper_bounce.py settle       # 有持仓时
+python3 research/forward_gate_recorder.py             # G2/G3/G4 目标暴露
+python3 research/forward_thermometer_recorder.py      # 涨停生态快照
+python3 research/forward_cb_recorder.py               # 双低名单+主板信用温度计
+python3 research/forward_divlv_recorder.py            # 红利名单（季度，季初窗口）
+python3 research/forward_health_check.py              # 台账自检（问题→飞书）
 ```
 
-纪律：bounce 不满 20 次事件、gate 不满 120 个交易日，不做统计结论、不调参。
-台账在 `output/forward_paper_bounce/` 与 `output/forward_gate_recorder/`。
+纪律：bounce 不满 20 次事件、gate 不满 Day250 主决策点（PROTOCOL_V1），
+不做统计结论、不调参。全部台账在 `forward_state/`（git 跟踪=防篡改留痕）。
 
 ## 2026-07 搜索轮结论摘要
 
