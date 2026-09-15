@@ -37,3 +37,8 @@ jobs:
       - name: Check shell syntax
         run: |
           bash -n scripts/*.sh
+
+      - name: Analysis rule evaluation checks (no model calls)
+        run: |
+          python eval/run_eval.py
+          python -m unittest discover -s eval -p "test_*.py"

@@ -2,10 +2,12 @@
 
 ## 项目定位
 
-本项目是**个人量化辅助与 AI 工具落地探索项目**，用于验证 Codex Sub-agents 在金融数据协作工作流、收盘扫描、模拟交易计划生成中的适用边界。
+本项目是 **AI Agent 辅助策略研究与分析框架**。通过数据检查、指标诊断、候选假设、Python 定量验证、反方检查和人工确认，组织可验证、可复盘的研究。
 
 **不是**：自动化实盘交易系统、面向公众的投资顾问工具、生产级金融产品
-**是**：个人使用项目，探索数据抓取、候选筛选、风控参数生成、任务分工、上下文传递、产出聚合的工程模式
+**是**：个人研究与求职展示项目；保留数据抓取、收盘扫描、模拟计划、因子研究、回测和前向观察，展示分析方法、工具分工和证据边界。
+
+**AI 提出假设，程序验证结论。** 方法见 [docs/analysis_methodology.md](docs/analysis_methodology.md)，运行机制与未实施的权限控制见 [docs/agent_harness.md](docs/agent_harness.md)。
 
 ## 核心原则
 
@@ -19,15 +21,27 @@
    - 不确定的结论用"数据显示…"而非"预测…"
 
 3. **每次运行留痕**
-   所有产出存入 `output/YYYY-MM-DD/` 目录，包含：原始数据、中间计算、最终报告、运行日志。
+   日报产出存入 `output/YYYY-MM-DD/`，运行日志在 `logs/`；研究结果各有独立 `output/` 子目录，Hermes 草案在 `strategy_experiments/`，主模拟台账与经验记录在 `data/`。已有独立前向观察使用 `forward_state/` 跟踪记录，不回写历史。
+
+## 分析与证据的共同规则
+
+- Agent 可以读取数据、总结信息、拆解问题、提出候选假设和实验建议、寻找反例、整理报告。
+- Agent 不得编造缺失数据、把自然语言推测当数值结论、把相关性直接写成因果、因为短期收益好就建议直接晋级。
+- 关键数值必须调用 Python / 现有研究脚本计算。文字与程序冲突时核对日期、样本、单位和口径，再修正文字；若程序或数据可疑，暂停结论并登记待重算问题，不能挑选有利数字。
+- 每个重要判断注明来源文件、日期范围、样本量和局限。缺来源或样本量时明确不足，不给高置信度策略结论。
+- 候选假设需列支持证据、反对证据、还需进行的分析及当前置信程度。反方意见也要接受证据核查。
+- 重要策略变化必须经过独立实验、历史验证、反方检查与明确人工确认；实验草案、短期表现和观察样本达标均不构成自动晋级。
+- 样本门槛沿用各研究协议，不把健康监控的记录数、bounce 事件数和 gate 观察天数混为一谈。
+- 新分析可用 Rejected（证据不支持）、Inconclusive（证据不足）、Promising（初步支持）、Validated（通过预设主要验证）分级；不回填历史状态，不把 Validated 当收益承诺。
+- 既有因子代码的确定性缺失处理需披露口径，不得包装成真实观测；缺失行情不能由 Agent 估算补造。
 
 ## 技术栈
 
-- **语言**: Python 3.11+
+- **语言**: 日报环境建议 Python 3.12；独立 Eval 仅需 Python 3.11+ 标准库
 - **数据源**: akshare（A股日频数据）
 - **数据处理**: pandas, numpy
-- **技术指标**: ta-lib 或 pandas-ta
-- **Agent 框架**: Codex 原生 Task 工具（Sub-agents）
+- **技术指标**: `src/analyzer.py` 使用 pandas-ta
+- **运行方式**: 默认 Python 直接调用与模板；可选 Claude CLI 综合观察、Hermes CLI 诊断。历史 Task 角色设计不代表当前默认入口在启动多个 Agent。
 
 ## 项目结构
 
@@ -39,30 +53,33 @@ Codex-trading-agents/
 ├── strategy.json          # 主策略与扫描配置
 ├── freeze_v3_strategy.json# 冻结 V3 规则
 ├── requirements.txt       # Python 依赖
-├── src/                   # 每日运行核心（定时任务只允许依赖这里）
+├── src/                   # 主日报与扫描运行核心
 │   ├── market_scanner.py          # 收盘扫描、模拟计划、台账
 │   ├── scheduled_v3_reporter.py   # V3 日报
 │   ├── forward_paper_trading_v3.py# 冻结 V3 forward paper 记录
 │   ├── quant_core.py              # 共享量化库（缓存/可交易性/股票池/V3 过滤）
 │   ├── data_fetcher.py / analyzer.py / reporter.py / notifier.py
 │   └── reviewer.py / selector.py / synthesizer.py / strategy_health.py / strategy_learning.py
-├── research/              # 研究代码（已收敛；不得被 src/ 或定时任务导入）
+├── research/              # 研究及独立前向观察代码；不得被 src/ 导入
 ├── archive/               # 弃用入口与 legacy 策略（仅回滚/对照用）
 ├── prompts/               # sub-agent 与 Hermes 指令
 ├── scripts/               # shell 入口（推送、Hermes steward）
 ├── output/YYYY-MM-DD/     # 每日产出
 ├── logs/                  # 运行日志
-└── docs/                  # 文档（含 refactor_2026-07-03.md 重构说明）
+├── eval/                  # 独立规则评测，不进入每日运行路径
+└── docs/                  # 方法、案例、历史研究与操作说明
 ```
 
 **分层约束（2026-07-03 重构确立）**：
 
-- `src/` 是唯一的每日运行层：GitHub Actions 与 shell 脚本只能调用 `src/` 和 `main_v2.py`。
+- `src/` 和 `main_v2.py` 是主日报与扫描层。后续已有的 `.github/workflows/daily-forward-observation.yml` 独立调用 `research/forward_*.py` 记录前向样本；这是现状例外，不把研究搜索或调参加入主日报。
 - `research/` 内的模块可以导入 `src/`，但 `src/` 不得反向导入 `research/`。
 - 运行路径需要的共享函数统一放 `src/quant_core.py`，不要再从研究轮次文件里 import。
 - 新研究实验放 `research/`，一次性诊断脚本也放 `research/`，不要放进 `src/`。
 
 ## Sub-agent 职责分工
+
+以下是协作时的角色约定，保留历史设计以便复盘；当前 `main_v2.py` 的抓取、数值分析和报告由 Python 函数直接完成，不必启动对应 Agent。只有需要独立文本解释且用户启用时才使用可选综合观察，Hermes 模式另见 `HERMES.md`。
 
 ### 1. 数据抓取 Agent (`data_agent`)
 
@@ -81,7 +98,7 @@ Codex-trading-agents/
 
 **输入**: 数据抓取 agent 产出的 CSV 文件
 **职责**:
-- **技术面**: 计算 MA5/MA10/MA20、MACD、RSI(14)、布林带
+- **技术面**: 调用 `src/analyzer.py` 计算 MA5/MA10/MA20、MACD、RSI(14)、布林带，不由模型心算
 - **基本面**: 对比 PE/PB 与行业中位数（如能获取）、分析 ROE 和营收增速趋势
 - **结合视角**: 识别技术面信号与基本面状况是否一致（如"技术面超买但基本面改善" vs "技术面超卖但基本面恶化"）
 - 输出结构化 JSON 到 `output/YYYY-MM-DD/analysis/`
@@ -131,19 +148,19 @@ Codex-trading-agents/
 
 ## 主 Agent 调度规则
 
-当用户请求"跑今日分析"或类似指令时，主 agent 的标准流程：
+当用户请求"跑今日分析"或类似指令时，沿用 `main_v2.py` 的当前流程：
 
 1. 读取 `watchlist.json` 确认标的列表
 2. 创建当日输出目录 `output/YYYY-MM-DD/`
-3. **并行调用** `data_agent` 抓取所有标的数据
-4. 数据抓取完成后，**并行调用** `analysis_agent` 对每只标的独立分析
-5. 所有分析完成后，**串行调用** `report_agent` 整合为最终报告
+3. 调用 Python 抓取函数，再调用分析函数计算指标
+4. 默认用 `src/synthesizer.py` 模板生成综合观察；明确启用 `--llm` 才调用文本 Agent，失败由模板兜底
+5. 调用 `src/reporter.py` 整合报告；消息推送只按用户请求和既有配置执行
 6. 打印报告路径，结束会话
 
 **关键约束**:
-- Sub-agent 之间**不直接通信**，所有数据通过文件系统（JSON/CSV）传递
-- 主 agent 负责聚合和错误兜底
-- 任一 sub-agent 失败时，主 agent 决定是否继续（数据抓取失败 → 跳过该标的；分析失败 → 中断流程）
+- 数据和解释通过 JSON/CSV 文件交接；主入口负责聚合状态与错误兜底。
+- 数据缺失、计算失败要在状态和报告中保留，不将失败改写为完整成功。
+- 不为了“Multi-Agent”名称把纯计算重新拆成 Agent。
 
 ## 代码风格约定
 
@@ -159,17 +176,9 @@ Codex-trading-agents/
 
 ## 开发工作流
 
-**阶段 1（当前）**: 串行版本跑通
-- 先不用 sub-agent，在主会话里依次调用三个工具模块
-- 验证数据抓取、分析、报告生成的业务逻辑
+当前默认直调、可选综合观察与 Hermes 模式分别按现有入口维护。早期分阶段试验经过保留在 `docs/sop.md` 与 `archive/`，不把曾经的目标写成已经实现的能力。
 
-**阶段 2**: 拆分为 sub-agent
-- 将三个模块的 prompt 独立写到 `prompts/` 目录
-- 主 agent 用 Task 工具并行调度
-
-**阶段 3**: 工程化
-- 加入运行日志和错误恢复
-- 编写 SOP 文档（`docs/sop.md`），记录 sub-agent 协作的最佳实践与踩坑经验
+修改前检查 `git status` 并保护用户未提交内容；独立实验不修改主策略参数、历史回测结果或前向记录。新增 Eval 验证用 `python eval/run_eval.py` 和 `python -m unittest discover -s eval -p "test_*.py"`，这不代表真实模型测试通过。
 
 ## 面试/复盘可提及的关键收获
 
