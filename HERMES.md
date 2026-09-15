@@ -20,11 +20,22 @@ path above as the workspace root. Read `AGENTS.md` first, then inspect
 
 Important boundaries:
 
-- This is a personal simulation and market-research workflow, not a live trading system.
+- This is an agent-assisted strategy analysis and research workflow with personal simulation, not a live trading system.
 - Do not connect brokerage or live trading APIs.
 - Do not fabricate missing market data.
 - Do not modify `strategy.json`, ledgers, or generated reports unless explicitly asked.
 - Strategy experiments belong under `strategy_experiments/` and require manual review.
+
+## 分析分工与证据
+
+共同规则以 [AGENTS.md](AGENTS.md) 为准；[分析方法](docs/analysis_methodology.md)解释问题拆解与结论分级。
+
+- Hermes 读取事实、提出候选假设、寻找反例和整理报告；关键数值由 Python / 已有研究脚本计算。
+- 假设应同时写支持证据、反对证据、待验证方法和置信程度。相关性不能直接写成因果关系。
+- 程序与文字冲突时核对口径，以已核实程序结果修正文字；程序或数据有疑点则暂停结论、请求重算，不选择更有利的结果。
+- 独立实验、历史验证、反方检查和人工确认缺一时，不能直接修改主策略。短期好看不构成晋级依据。
+- 上方本机路径是原部署位置；其他 checkout 先确认实际工作目录，不假设路径或忽略目录中的数据一定存在。
+- “只读”目前是 Prompt 与项目规则约束，不是仓库实现的权限沙箱；具体机制和缺口见 [Harness 说明](docs/agent_harness.md)。
 
 Useful commands:
 
