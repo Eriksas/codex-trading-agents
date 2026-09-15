@@ -1,0 +1,4 @@
+trade_id,review_date,status,data_quality,entry_date,close_vs_signal_pct,max_favorable_pct,max_adverse_pct
+DEMO_A,2026-01-16,stopped,complete,2026-01-12,-0.04,0.01,-0.05
+DEMO_B,2026-01-16,take_profit,complete,2026-01-12,0.02,0.03,-0.01
+DEMO_C,2026-01-16,missing_data,missing_bar,,,,
