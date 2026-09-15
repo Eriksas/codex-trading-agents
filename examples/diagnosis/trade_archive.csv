@@ -1,0 +1,3 @@
+trade_id,exit_date,net_return,market_regime_label
+DEMO_A,2026-01-16,-0.04,合成环境
+DEMO_B,2026-01-16,0.02,合成环境

@@ -37,6 +37,8 @@
 
 ## 技术栈
 
+新读者的主展示入口为 `python main.py demo`；已有数据诊断为 `python main.py diagnose --date YYYY-MM-DD`，见 [docs/quickstart.md](docs/quickstart.md)。它复用健康统计、只读输入，产物写入独立的 `output/diagnosis/`；不调用模型，可导入待人工评审的解释。原每日入口继续保持原行为。
+
 - **语言**: 日报环境建议 Python 3.12；独立 Eval 仅需 Python 3.11+ 标准库
 - **数据源**: akshare（A股日频数据）
 - **数据处理**: pandas, numpy
@@ -48,6 +50,7 @@
 ```
 Codex-trading-agents/
 ├── AGENTS.md              # 本文件（项目总配置）
+├── main.py                # 统一健康诊断与离线展示入口
 ├── main_v2.py             # watchlist 每日报告入口
 ├── watchlist.json         # 自选股列表（修改标的只动这里）
 ├── strategy.json          # 主策略与扫描配置
@@ -67,6 +70,8 @@ Codex-trading-agents/
 ├── output/YYYY-MM-DD/     # 每日产出
 ├── logs/                  # 运行日志
 ├── eval/                  # 独立规则评测，不进入每日运行路径
+├── examples/diagnosis/    # 明确标记的合成教学样例
+├── tests/                 # 主诊断流程的离线测试
 └── docs/                  # 方法、案例、历史研究与操作说明
 ```
 

@@ -1,4 +1,26 @@
-# research/ - 研究代码（已收敛）
+# 研究代码导航
+
+**新读者先运行主流程：`python main.py demo`。** 日常健康诊断见[五分钟上手](../docs/quickstart.md)，不需要逐个执行本目录中的实验。
+
+## 按用途找代码
+
+| 用途 | 入口 | 使用边界 |
+|---|---|---|
+| 可复用分析工具 | [factor_research.py](factor_research.py)、[说明](../docs/factor_research.md) | IC/分组/相关性/消融；需要已有行情缓存，仍依赖旧扫描逻辑 |
+| 可复用回测工具 | [panel_backtester.py](panel_backtester.py)、[算例](test_panel_backtester.py) | 面板回测和执行口径验证；不等于任意策略已通过 |
+| 数据准备 | [data_expansion_pipeline.py](data_expansion_pipeline.py)、[build_panel_v2.py](build_panel_v2.py) | 显式准备数据，不属于离线示例 |
+| 正在记录的前向观察 | [bounce](forward_paper_bounce.py)、[gate](forward_gate_recorder.py)、[温度计](forward_thermometer_recorder.py)、[可转债](forward_cb_recorder.py)、[红利](forward_divlv_recorder.py) | 原有独立工作流按冻结协议收集新样本；不是晋级 |
+| 观察检查与报告 | [健康检查](forward_health_check.py)、[每日报告](forward_daily_report.py) | 服务已有观察记录 |
+| 历史实验 | factor_research_round2–6、freeze、diagnose、setup、strategy_search 等 | 保留原代码和链式依赖，按明确复现需求运行；不自动重跑 |
+
+`src/` 不导入研究层。后续已有独立前向观察工作流会调用本目录的 `forward_*.py`，不能套用早期“定时任务不依赖研究层”的概括。
+
+研究结论以[文档导航](../docs/README.md)中的后续修正为准：旧 V3 数字被重审，bounce 的稳定性和 abturn 的增量贡献叙事也被后续证据降级。
+
+<details>
+<summary>展开原有研究说明、历史状态和前向观察命令</summary>
+
+以下保留原说明作为历史记录；其中“当前”“已收敛”和早期结论需结合上方后续修正阅读。
 
 本目录存放因子研究、扩展回测、setup-based 实验和一次性诊断脚本。
 它们**不在每日运行路径上**，`src/` 与定时任务不得导入本目录。
@@ -63,3 +85,5 @@ python3 research/backtest_v3_expanded.py
 ```
 
 模块间导入依赖脚本所在目录自动加入 `sys.path`；`market_scanner` 等运行核心通过各文件头部的 `ROOT_DIR / "src"` 注入解析。
+
+</details>
