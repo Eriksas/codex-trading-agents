@@ -11,6 +11,7 @@
 | [真实诊断案例](case_study_strategy_diagnosis.md) | 怎样从早期好看的结果回到证据不足 |
 | [Harness](agent_harness.md) | 已有运行机制、人工责任和权限缺口 |
 | [第一阶段实现](diagnosis_entry.md) | 本轮改动、兼容边界与验证方法 |
+| [第二阶段扫描器拆分](scanner_refactor.md) | 数据、规则、回测、台账与报告分别在哪里，以及怎样验证等价 |
 
 ## 工具与操作：需要时查
 
