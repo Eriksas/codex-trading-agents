@@ -77,9 +77,12 @@ AI 可以帮助拆解问题、整理结果、生成报告文字和寻找反例�
 ## 开发验证
 
 ```bash
+python -m pip install pandas numpy requests certifi
 python -m unittest discover -s tests -p "test_*.py"
 python eval/run_eval.py
 python -m unittest discover -s eval -p "test_*.py"
 ```
 
 原有行情环境与引擎测试的依赖见[上手指南](docs/quickstart.md)。诊断产物存入 `output/diagnosis/`，每次新建目录；密钥和本地运行产物按 [.gitignore](.gitignore) 忽略。原有配置、日报入口、冻结规则与前向观察记录保留。
+
+维护扫描逻辑时，按[扫描器职责说明](docs/scanner_refactor.md)查找数据、规则、回测、台账或报告模块；原扫描命令和历史函数导入保持兼容。

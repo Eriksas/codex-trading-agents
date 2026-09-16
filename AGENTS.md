@@ -57,7 +57,10 @@ Codex-trading-agents/
 ├── freeze_v3_strategy.json# 冻结 V3 规则
 ├── requirements.txt       # Python 依赖
 ├── src/                   # 主日报与扫描运行核心
-│   ├── market_scanner.py          # 收盘扫描、模拟计划、台账
+│   ├── market_scanner.py          # 收盘扫描编排、CLI 与历史接口兼容
+│   ├── scanner_config/data/rules.py # 扫描配置、数据缓存、筛选与计划
+│   ├── scanner_backtest/ledger/report.py # 回测、台账、报告
+│   ├── scanner_utils.py          # 扫描器内部的格式化与 CSV 辅助
 │   ├── scheduled_v3_reporter.py   # V3 日报
 │   ├── forward_paper_trading_v3.py# 冻结 V3 forward paper 记录
 │   ├── quant_core.py              # 共享量化库（缓存/可交易性/股票池/V3 过滤）
@@ -80,6 +83,7 @@ Codex-trading-agents/
 - `src/` 和 `main_v2.py` 是主日报与扫描层。后续已有的 `.github/workflows/daily-forward-observation.yml` 独立调用 `research/forward_*.py` 记录前向样本；这是现状例外，不把研究搜索或调参加入主日报。
 - `research/` 内的模块可以导入 `src/`，但 `src/` 不得反向导入 `research/`。
 - 运行路径需要的共享函数统一放 `src/quant_core.py`，不要再从研究轮次文件里 import。
+- 扫描器内部职责已拆到 `src/scanner_*.py`，见 [第二阶段说明](docs/scanner_refactor.md)。这些组件不得反向导入 `market_scanner.py` 或研究轮次；私有格式化/CSV 辅助放 `scanner_utils.py` 以避免 quant_core 既有依赖造成循环，不扩展为新的研究公共库。旧调用经 `market_scanner` 兼容导入，配置仍通过 `_set_active_config` 切换。
 - 新研究实验放 `research/`，一次性诊断脚本也放 `research/`，不要放进 `src/`。
 
 ## Sub-agent 职责分工

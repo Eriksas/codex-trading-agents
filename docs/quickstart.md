@@ -114,3 +114,5 @@ python -m pip install -r requirements.txt
 PowerShell 激活用 `.venv\Scripts\Activate.ps1`。没有 `.env` 时才复制 [.env.example](../.env.example)；真实密钥仅写本地环境或 Actions Secrets。扫描可能请求行情；`--push-dry-run` 只模拟推送，不代表整个分析离线。
 
 既有回测引擎验证：`python research/test_panel_backtester.py`（需 pandas、numpy）。推送与运行配置见[推送说明](push.md)，本次统一诊断本身不推送。
+
+开发测试现包含扫描器回归，最小测试依赖为 `python -m pip install pandas numpy requests certifi`；再运行 `python -m unittest discover -s tests -p "test_*.py"`。只运行 `main.py demo` 仍不需要这些依赖。扫描模块的位置和兼容方式见[第二阶段说明](scanner_refactor.md)。
