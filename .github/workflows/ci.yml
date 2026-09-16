@@ -29,9 +29,9 @@ jobs:
         run: |
           python -m py_compile $(git ls-files '*.py')
 
-      - name: Backtester engine fixture tests
+      - name: Offline test dependencies and backtester fixtures
         run: |
-          pip install --quiet pandas numpy
+          pip install --quiet pandas numpy requests certifi
           python research/test_panel_backtester.py
 
       - name: Check shell syntax
@@ -43,7 +43,7 @@ jobs:
           python eval/run_eval.py
           python -m unittest discover -s eval -p "test_*.py"
 
-      - name: Diagnosis workflow (offline synthetic example)
+      - name: Diagnosis and scanner regression (offline synthetic inputs)
         run: |
           python -m unittest discover -s tests -p "test_*.py"
           python main.py demo
