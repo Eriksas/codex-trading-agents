@@ -3,7 +3,7 @@ main_v2.py - 正确架构版主调度脚本（阶段 2.3）
 
 架构原则（从阶段 2.2 实验总结）：
   纯计算任务（技术指标、数据聚合）→ 直接函数调用，无 sub-agent
-  synthesis 生成                  → 默认模板直调；可选 subprocess sub-agent（claude --print --model haiku）
+  synthesis 生成                  → 默认模板直调；可选 Claude 无工具文字调用，由 Python 验证回写
 
 流程：
   步骤 1：data_fetcher.run_data_fetch()    — 直接函数调用（数据抓取）
@@ -22,7 +22,6 @@ main_v2.py - 正确架构版主调度脚本（阶段 2.3）
 import argparse
 import json
 import logging
-import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -60,8 +59,6 @@ def _build_synthesis_prompt(code: str, stock_name: str, analysis_path: Path) -> 
     task_params = (
         f"- CODE: `{code}`\n"
         f"- STOCK_NAME: `{stock_name}`\n"
-        f"- ANALYSIS_PATH: `{analysis_path}`\n"
-        f"- WORKING_DIR: `{WORKING_DIR}`\n"
     )
     return (
         template
@@ -70,6 +67,7 @@ def _build_synthesis_prompt(code: str, stock_name: str, analysis_path: Path) -> 
         .replace("{STOCK_NAME}", stock_name)
         .replace("{ANALYSIS_PATH}", str(analysis_path))
         .replace("{WORKING_DIR}", str(WORKING_DIR))
+        .replace("{ANALYSIS_JSON}", analysis_path.read_text(encoding="utf-8"))
     )
 
 
@@ -92,66 +90,53 @@ def _parse_synthesis_status(output: str, code: str) -> dict:
 
 
 def run_synthesis_agent(code: str, stock_name: str, analysis_path: Path) -> dict:
-    """
-    通过 claude CLI 启动单只股票的 synthesis sub-agent，写入 synthesis 字段后返回状态。
+    """请求无工具文字结果，由 Python 验证并仅更新 synthesis 字段。"""
+    from src.agent_client import call_agent
+    from src.analysis_contract import parse_json
+    from src.synthesizer import FORBIDDEN_TERMS, build_synthesis
+    from uuid import uuid4
 
-    Args:
-        code:          6 位股票代码
-        stock_name:    股票中文名
-        analysis_path: analysis/{code}.json 绝对路径
-    Returns:
-        状态字典：{"code", "status", "synthesis_chars"/"error", "elapsed_seconds"}
-    """
-    prompt = _build_synthesis_prompt(code, stock_name, analysis_path)
-
-    logger.info(f"[{code}] 启动 synthesis sub-agent（{stock_name}）")
-
-    t_start = time.time()
+    started = time.monotonic()
+    called = False
+    skip_template_fallback = False
     try:
-        proc = subprocess.run(
-            [
-                "claude",
-                "--print",
-                "--dangerously-skip-permissions",
-                "--output-format", "text",
-                "--model", "haiku",
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=SYNTHESIS_TIMEOUT_SECONDS,
-            cwd=str(WORKING_DIR),
-        )
-        elapsed = time.time() - t_start
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-
-        logger.info(f"[{code}] synthesis 完成，耗时 {elapsed:.1f}s，returncode={proc.returncode}")
-        if stderr:
-            logger.debug(f"[{code}] synthesis stderr: {stderr[:300]}")
-
-        log_path = Path("logs") / f"synthesis_{code}_{datetime.today().strftime('%Y%m%d')}.log"
-        log_path.parent.mkdir(exist_ok=True)
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(f"=== PROMPT ({len(prompt)} chars) ===\n{prompt}\n\n")
-            f.write(f"=== STDOUT ===\n{stdout}\n\n")
-            f.write(f"=== STDERR ===\n{stderr}\n")
-            f.write(f"=== returncode={proc.returncode}, elapsed={elapsed:.1f}s ===\n")
-
-        status = _parse_synthesis_status(stdout, code)
-        status["elapsed_seconds"] = round(elapsed, 1)
-
-    except subprocess.TimeoutExpired:
-        elapsed = time.time() - t_start
-        logger.error(f"[{code}] synthesis sub-agent 超时（>{SYNTHESIS_TIMEOUT_SECONDS}s）")
-        status = {"code": code, "status": "failed",
-                  "error": f"timeout after {elapsed:.0f}s"}
-
-    except FileNotFoundError:
-        logger.error("[ERROR] `claude` CLI 未找到，请确认 Claude Code 已安装且在 PATH 中")
-        status = {"code": code, "status": "failed", "error": "claude CLI not found"}
-
-    return status
+        original = analysis_path.read_bytes()
+        data = parse_json(original.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("analysis 必须为 JSON 对象")
+        if data.get("data_quality") == "failed":
+            synthesis = build_synthesis(data)
+            status = "success_template_fallback"
+        else:
+            prompt = _build_synthesis_prompt(code, stock_name, analysis_path)
+            call = call_agent(
+                prompt, backend="claude", model="haiku", timeout=SYNTHESIS_TIMEOUT_SECONDS,
+                output_dir=WORKING_DIR / "logs" / "agent_calls" / f"synthesis-{uuid4().hex}",
+            )
+            called = call["model_called"]
+            if call["status"] != "completed":
+                raise ValueError(f"受控综合观察调用失败：{call['status']}")
+            value = parse_json(call["text"])
+            if not isinstance(value, dict) or set(value) != {"code", "synthesis"} or value["code"] != code:
+                raise ValueError("综合观察结果字段或 code 不匹配")
+            synthesis = value["synthesis"]
+            if not isinstance(synthesis, str) or not 80 <= len(synthesis) <= 200:
+                raise ValueError("综合观察必须为 80 至 200 字")
+            if any(term in synthesis for term in FORBIDDEN_TERMS):
+                raise ValueError("综合观察含不允许的操作性用语")
+            status = "success"
+        if analysis_path.read_bytes() != original:
+            skip_template_fallback = True
+            raise ValueError("analysis 在调用期间发生变化，拒绝覆盖")
+        data["synthesis"] = synthesis
+        analysis_path.write_text(json.dumps(data, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+        return {"code": code, "status": status, "synthesis_chars": len(synthesis),
+                "model_called": called, "elapsed_seconds": round(time.monotonic() - started, 1)}
+    except (OSError, ValueError, TypeError) as exc:
+        logger.error("[%s] synthesis 失败：%s", code, exc)
+        return {"code": code, "status": "failed", "error": str(exc), "model_called": called,
+                "skip_template_fallback": skip_template_fallback,
+                "elapsed_seconds": round(time.monotonic() - started, 1)}
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +300,7 @@ def run_daily_pipeline(
                         "code": stock["code"], "status": "failed",
                         "error": str(e),
                     })
-        fallback_targets = [r["code"] for r in synthesis_results if r.get("status") != "success"]
+        fallback_targets = [r["code"] for r in synthesis_results if r.get("status") != "success" and not r.get("skip_template_fallback")]
         if fallback_targets:
             logger.warning(f"synthesis LLM 失败 {len(fallback_targets)} 只，使用模板兜底: {fallback_targets}")
             from synthesizer import synthesize_file
