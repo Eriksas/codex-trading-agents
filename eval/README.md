@@ -1,6 +1,6 @@
 # 最小 Agent / 分析流程评测
 
-这里评测“回答是否遵守分析规则”，不评测收益率。当前为标准库实现的离线检查器，**没有自动调用 LLM，也没有真实 Agent 通过率**。
+这里评测“回答是否遵守分析规则”，不评测收益率。默认仍是标准库离线检查器；新增显式选择 Claude 后的回答采集入口。**本轮未完成真实账户调用，没有已测得的 Agent 通过率。**
 
 ## 已实现什么
 
@@ -8,7 +8,8 @@
 - [run_eval.py](run_eval.py)：校验案例定义；导入回答后检查字段类型、来源引用、数据不足、置信等级、晋级动作、因果声明、程序数值和必需步骤。
 - [test_run_eval.py](test_run_eval.py)：手写正反控制样例，确认检查器能拒绝各类越界字段、错误数字和无效输入。这些是程序单元测试，不是 Agent 作答。
 - 报告包含输入文件 SHA256、时间、逐案例检查、缺失案例和待人工项；默认只输出 JSON，可写入忽略的 `output/agent_eval/`。
-- 不导入项目运行模块，不访问网络，不执行案例中的命令，不修改策略或台账；[CI](../.github/workflows/ci.yml)仅运行案例检查和单元测试。
+- `run_eval.py` 不导入项目运行模块或访问网络；[CI](../.github/workflows/ci.yml)仅运行案例检查和合成测试，不执行真实采集命令。
+- [collect_eval.py](collect_eval.py)复用受控客户端，显式采集原始回答后交给原检查器；不把输入案例中的任务当成可执行命令。
 
 ## 运行
 
@@ -23,7 +24,7 @@ python -m unittest discover -s eval -p "test_*.py"
 
 ## 导入真实回答
 
-本轮没有为现有 Claude/Hermes CLI 新增统一采集适配器。人工采集步骤：
+可以保留以下人工采集方式。Claude 自动采集方式见后面的小节；Hermes 当前保留人工导入。
 
 1. 固定模型名称/版本、Prompt 版本、采集时间。给模型现有角色规则、下面的输出契约及案例 `id`、`title`、`input`；**不要给 `expected` 和 `manual_review` 答案表**。只要求回答，不给文件修改工具。
 2. 保存模型原始结构化回答，不为了通过评测改写。字段不合规也保留为失败；若模型输出 Markdown 包裹而非 JSON，先作为格式问题记录，不默默修成成功。
@@ -88,4 +89,16 @@ python eval/run_eval.py --responses output/agent_eval/responses.json --output ou
 
 ## 暂未实现
 
-真实模型批量采集、Prompt 版本 A/B 对比、自然语言事实核验、工具调用轨迹检查、独立审批服务和强制沙箱。它们不是本轮已经交付的能力。
+真实账户运行验收、Hermes 受控自动适配、Prompt 版本 A/B 对比、自然语言事实核验、完整工具调用轨迹审计、独立审批服务和操作系统沙箱。
+
+## 显式采集 Claude 回答
+
+```bash
+python eval/collect_eval.py --agent claude --model haiku
+```
+
+需要本机支持受控参数的 Claude CLI、实际可用模型和有效认证；可能产生最多六次模型调用的费用。默认 `run_eval.py` 不会触发此命令。
+
+采集器只发送 `id/title/input` 和通用字段约定，不发送 `expected` 或人工答案表。原始输出、调用记录、`responses.json` 和 `evaluation.json` 存于新的 `output/agent_eval/capture-.../`。格式错误的回答保留失败，不修成正确答案；客户端或传输失败时停止后续采集。
+
+采集报告中的 `model_called` 根据实际 CLI 状态记录：明确成功为 true，未启动为 false，启动后失败/超时且无法判断为 null。它与离线检查器固定的 false 不同，也不是模型身份认证。没有有效回答时状态为 `capture_failed`，不生成通过率；覆盖不全为 `incomplete`。详情见[受控调用](../docs/controlled_agents.md)。
