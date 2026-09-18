@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from .analysis_contract import read_interpretation as _read_interpretation
+from .agent_client import validate_settings
+from .agent_workflow import model_call_status, run_analysis_agent
 from .reviewer import STATUS_LABELS
 from .strategy_health import build_strategy_health
 
@@ -164,41 +167,6 @@ def _collect_facts(input_root: Path, archive_path: Path, as_of_date: str, questi
     }
 
 
-def _read_interpretation(path: Path, facts_hash: str, facts: dict[str, Any]) -> dict[str, Any]:
-    """校验导入回答的版本、来源与结构；全文语义仍需人工评审。"""
-    raw_bytes = path.read_bytes()
-    raw = raw_bytes.decode("utf-8")
-    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("回答 JSON 有重复键")
-            result[key] = value
-        return result
-    value = json.loads(raw, object_pairs_hook=unique)
-    expected = {"facts_sha256", "model", "hypotheses", "critic"}
-    if not isinstance(value, dict) or set(value) != expected or value["facts_sha256"] != facts_hash:
-        raise ValueError("回答字段不匹配或 facts_sha256 已过期；请使用本次材料重新分析")
-    if not isinstance(value["model"], str) or not value["model"].strip():
-        raise ValueError("回答必须注明实际模型；手写示例填 handwritten")
-    def texts(items: Any, nonempty: bool = True) -> bool:
-        return isinstance(items, list) and (bool(items) or not nonempty) and all(isinstance(x, str) and bool(x.strip()) for x in items)
-    if not isinstance(value["hypotheses"], list) or not texts(value["critic"]):
-        raise ValueError("hypotheses 必须为列表，critic 必须含反方意见或不足说明")
-    source_ids = {item["id"] for item in facts["sources"]} | {"python_metrics", "data_quality"}
-    for item in value["hypotheses"]:
-        if not isinstance(item, dict) or set(item) != {"claim", "evidence_ids", "counterevidence", "next_check", "confidence"}:
-            raise ValueError("假设字段错误")
-        if not all(isinstance(item[key], str) and item[key].strip() for key in ("claim", "counterevidence", "next_check")):
-            raise ValueError("假设、反证、待验证分析不得为空")
-        if not texts(item["evidence_ids"]) or not set(item["evidence_ids"]) <= source_ids:
-            raise ValueError("假设引用了未知来源")
-        if item["confidence"] not in ("low", "medium", "high"):
-            raise ValueError("未知置信程度")
-        if (facts["small_sample"] or facts["quality"]["errors"] or facts["quality"]["warnings"]) and item["confidence"] != "low":
-            raise ValueError("样本或数据不足时，策略假设只允许低置信度")
-    return {"status": "imported_manual_review_pending", "source_sha256": hashlib.sha256(raw_bytes).hexdigest(),
-            "provenance_verified": False, "content": value}
 
 
 def _prompt(facts: dict[str, Any], facts_hash: str) -> str:
@@ -243,14 +211,17 @@ def _report(facts: dict[str, Any], interpretation: dict[str, Any]) -> str:
     lines += ["", "## 4. 一项可核查的数值陈述", "", check["claim"],
               f"- Python 判断：{label}；有效归档 {check['sample_size']} 条，均值 {pct(check['value'])}。",
               f"- {check['scope']}", "", "## 5. AI 候选解释与反方意见", ""]
-    if interpretation["status"] == "not_requested":
+    if interpretation["status"] in {"not_requested", "skipped_data_unavailable"}:
         lines += ["本次未调用或导入模型回答。agent_prompt.md 已准备好，解释和反方意见待补充。",
                   "没有把模板文字或数值规则冒充 AI 分析。"]
+        if interpretation["status"] == "skipped_data_unavailable":
+            lines.append("已请求 AI，但没有可用统计或输入有错误，因此未启动模型调用。")
     elif interpretation["status"] == "rejected":
         lines.append("导入回答未通过检查，未用于结论：" + interpretation["error"])
     else:
         content = interpretation["content"]
-        lines += [f"导入来源（自行声明）：{content['model']}。**以下文字待人工核对，不覆盖 Python 数值。**"]
+        origin = "调用请求的模型" if interpretation["status"] == "generated_manual_review_pending" else "导入来源（自行声明）"
+        lines += [f"{origin}：{content['model']}。**以下文字待人工核对，不覆盖 Python 数值。**"]
         for item in content["hypotheses"]:
             lines += ["", f"### 候选：{item['claim']}", f"- 证据引用：{', '.join(item['evidence_ids'])}",
                       f"- 反证/局限：{item['counterevidence']}", f"- 待验证：{item['next_check']}", f"- 置信程度：{item['confidence']}"]
@@ -266,9 +237,17 @@ def _report(facts: dict[str, Any], interpretation: dict[str, Any]) -> str:
 
 def run_diagnosis(*, input_root: Path, archive_path: Path, as_of_date: str,
                   question: str = "现有记录是否足以支持策略表现稳定？", source_kind: str = "local_records",
-                  interpretation_path: Path | None = None, output_root: Path | None = None) -> tuple[dict[str, Any], int]:
+                  interpretation_path: Path | None = None, output_root: Path | None = None,
+                  agent_backend: str | None = None, agent_model: str | None = None,
+                  agent_timeout: float = 120) -> tuple[dict[str, Any], int]:
     """在全新运行目录保存报告、事实、Prompt 和日志，返回摘要及退出码。"""
     parse_date(as_of_date)
+    if agent_backend:
+        validate_settings(agent_backend, agent_model, agent_timeout)
+        if interpretation_path:
+            raise ValueError("自动调用与回答导入不能同时使用")
+    elif agent_model:
+        raise ValueError("指定模型时必须显式选择 --agent")
     if not question.strip() or source_kind not in {"local_records", "synthetic_demo"}:
         raise ValueError("问题不能为空，来源类型必须明确")
     output_root = output_root or ROOT / "output/diagnosis"
@@ -279,11 +258,20 @@ def run_diagnosis(*, input_root: Path, archive_path: Path, as_of_date: str,
     previous_level = LOGGER.level
     LOGGER.setLevel(logging.INFO)
     try:
-        LOGGER.info("开始诊断；source_kind=%s；model_called=false", source_kind)
+        LOGGER.info("开始诊断；source_kind=%s；agent_requested=%s", source_kind, bool(agent_backend))
         facts = _collect_facts(input_root, archive_path, as_of_date, question, source_kind, run_dir)
         rendered = json_text(facts)
         facts_hash = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
         interpretation: dict[str, Any] = {"status": "not_requested"}
+        agent_calls: list[dict[str, Any]] = []
+        if agent_backend:
+            if facts["quality"]["errors"] or not any(row["reviewed_count"] for row in facts["windows"]):
+                interpretation = {"status": "skipped_data_unavailable"}
+            else:
+                interpretation, agent_calls = run_analysis_agent(
+                    facts, facts_hash, backend=agent_backend, model=agent_model,
+                    output_dir=run_dir / "agent", timeout=agent_timeout,
+                )
         if interpretation_path:
             try:
                 interpretation = _read_interpretation(interpretation_path, facts_hash, facts)
@@ -291,7 +279,10 @@ def run_diagnosis(*, input_root: Path, archive_path: Path, as_of_date: str,
                 interpretation = {"status": "rejected", "error": str(exc)}
         code = 2 if facts["quality"]["errors"] or interpretation["status"] == "rejected" else 0
         status = "input_error" if code else "insufficient_data" if facts["small_sample"] or facts["quality"]["warnings"] else "manual_review_required"
-        result = {"status": status, "facts_sha256": facts_hash, "model_called": False,
+        if agent_backend and interpretation["status"] == "rejected":
+            status = "agent_error"
+        result = {"status": status, "facts_sha256": facts_hash, "model_called": model_call_status(agent_calls),
+                  "agent_calls": agent_calls,
                   "source_kind": source_kind, "interpretation": interpretation,
                   "report_path": str((run_dir / "report.md").resolve()), "human_decision": "pending"}
         (run_dir / "facts.json").write_text(rendered, encoding="utf-8", newline="\n")

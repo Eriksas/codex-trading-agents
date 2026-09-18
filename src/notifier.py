@@ -266,6 +266,13 @@ def build_push_content(report_path: Path, mode: str = "digest", max_chars: int =
 
     if mode == "full":
         content = text
+    elif first_title.startswith(("冻结策略观察日报", "前向观察日报")) and "## 今日结论" in text:
+        parts = ["个人模拟研究与复盘，不构成投资建议。"]
+        for header in ("## 今日结论", "## 事实依据", "## 如何理解", "## 还不能判断", "## 下一步", "## 数据来源"):
+            section = _extract_markdown_section(text, header, max_lines=12)
+            if section:
+                parts.extend(["", *section])
+        content = "\n".join(parts)
     elif "使用市场数据接口完成了" in text and "**今日候选" in text:
         return _build_scan_digest(text, report_path, max_chars=max_chars)
     else:

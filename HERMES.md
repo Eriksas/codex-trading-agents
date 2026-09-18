@@ -28,6 +28,8 @@ Important boundaries:
 
 ## 分析分工与证据
 
+第三阶段新增的受控自动客户端目前只支持 Claude。Hermes 原脚本继续沿用原边界，不把空 toolsets 参数当成禁用工具。需要在统一诊断中使用 Hermes 结果时，按事实包契约人工导入；见 [docs/controlled_agents.md](docs/controlled_agents.md)。
+
 共同规则以 [AGENTS.md](AGENTS.md) 为准；[分析方法](docs/analysis_methodology.md)解释问题拆解与结论分级。
 
 - Hermes 读取事实、提出候选假设、寻找反例和整理报告；关键数值由 Python / 已有研究脚本计算。

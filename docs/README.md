@@ -12,6 +12,8 @@
 | [Harness](agent_harness.md) | 已有运行机制、人工责任和权限缺口 |
 | [第一阶段实现](diagnosis_entry.md) | 本轮改动、兼容边界与验证方法 |
 | [第二阶段扫描器拆分](scanner_refactor.md) | 数据、规则、回测、台账与报告分别在哪里，以及怎样验证等价 |
+| [第三阶段受控 AI 调用](controlled_agents.md) | 两步文字调用、权限约束、失败记录与真实回答采集 |
+| [飞书日报说明](feishu_reports.md) | 怎样区分事实、解释和局限，以及现有云端推送路径 |
 
 ## 工具与操作：需要时查
 

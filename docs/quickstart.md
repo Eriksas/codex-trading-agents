@@ -72,7 +72,7 @@ python main.py diagnose --date 2026-09-15 --input-root "D:/my-reviews" --archive
 | `run.log` | 本次运行留痕 |
 | `python/` | 原健康模块生成的统计产物；格式错误/无复盘时不生成 |
 
-第一阶段不自动调用模型。需要 AI 辅助时：
+默认不自动调用模型。现在也可显式启用 `--agent claude --model haiku`，见[第三阶段说明](controlled_agents.md)；以下人工导入方式继续保留：
 
 1. 阅读 `agent_prompt.md`，确认其中本地路径和统计资料适合分享，再交给你使用的模型。无需给模型文件写入工具。
 2. 让模型按文件内的 JSON 契约返回候选假设、证据引用、反证、待验证方法和反方意见。保存原始 JSON，例如本地 `output/diagnosis/answer.json`。
