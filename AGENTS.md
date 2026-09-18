@@ -37,7 +37,7 @@
 
 ## 技术栈
 
-新读者的主展示入口为 `python main.py demo`；已有数据诊断为 `python main.py diagnose --date YYYY-MM-DD`，见 [docs/quickstart.md](docs/quickstart.md)。它复用健康统计、只读输入，产物写入独立的 `output/diagnosis/`；不调用模型，可导入待人工评审的解释。原每日入口继续保持原行为。
+新读者的主展示入口为 `python main.py demo`；已有数据诊断为 `python main.py diagnose --date YYYY-MM-DD`，见 [docs/quickstart.md](docs/quickstart.md)。它复用健康统计、只读输入，产物写入独立的 `output/diagnosis/`；默认不调用模型，可导入解释，或显式启用 `--agent claude --model ...` 执行受控诊断与反方检查。原日报默认模板路径保持原行为，可选 `--llm` 已改为无工具文字调用与 Python 回写，见 [docs/controlled_agents.md](docs/controlled_agents.md)。
 
 - **语言**: 日报环境建议 Python 3.12；独立 Eval 仅需 Python 3.11+ 标准库
 - **数据源**: akshare（A股日频数据）
@@ -87,6 +87,8 @@ Codex-trading-agents/
 - 新研究实验放 `research/`，一次性诊断脚本也放 `research/`，不要放进 `src/`。
 
 ## Sub-agent 职责分工
+
+受控自动路径共用 `src/agent_client.py`：禁止为兼容旧 CLI 删除禁用工具参数，不使用 `--dangerously-skip-permissions`。默认离线测试不调用模型；模型超时或认证失败不得记为成功。Hermes 未提供经核实的受控适配器前，保留人工导入与原路径边界说明。
 
 以下是协作时的角色约定，保留历史设计以便复盘；当前 `main_v2.py` 的抓取、数值分析和报告由 Python 函数直接完成，不必启动对应 Agent。只有需要独立文本解释且用户启用时才使用可选综合观察，Hermes 模式另见 `HERMES.md`。
 
