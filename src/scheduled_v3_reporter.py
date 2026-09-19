@@ -53,13 +53,13 @@ def render_v3_report(report_date: str, market_profile: dict[str, Any], candidate
     if market_profile.get("above_ma20_ratio") is not None:
         environment_evidence.append(f"- 已提供的指数样本中，位于自身 20 日均线之上的占 {_fmt_pct(market_profile['above_ma20_ratio'])}；指数平均当日涨跌幅 {_fmt_pct(market_profile.get('avg_index_change'))}。")
     if not regime:
-        conclusion = "市场环境数据不足，本次无法完成候选判断；没有生成新的模拟候选。"
+        conclusion = "市场环境数据不足，无法判断候选。"
     elif regime != "积极":
-        conclusion = f"本次没有新增模拟候选。环境被固定规则归为“{regime}”，尚未满足“积极环境才允许新开仓”的条件。"
+        conclusion = f"无新增模拟候选：环境为“{regime}”，尚未满足“积极环境才允许新开仓”的条件。"
     elif not candidates:
-        conclusion = "环境条件已满足，但本次没有标的进入模拟观察名单；需要结合下方筛选原因理解。"
+        conclusion = "环境条件已满足，暂无标的进入模拟名单；原因见筛选记录。"
     else:
-        conclusion = f"本次有 {len(candidates)} 只标的进入模拟观察名单；这表示符合冻结规则，需要后续复盘，不是策略已有效的证据。"
+        conclusion = f"本次 {len(candidates)} 只标的进入模拟名单，等待后续复盘。"
     reason_names = {
         "alpha040_core_ineligible": "排序基础条件未满足",
         "market_not_risk_on": "环境条件未满足",
@@ -71,26 +71,22 @@ def render_v3_report(report_date: str, market_profile: dict[str, Any], candidate
     }
     reason_text = "；".join(f"{reason_names.get(key, '其他未识别筛选项')} {value} 只" for key, value in reason_counts.items()) or "无可用筛选记录"
     lines = [f"# 冻结策略观察日报｜{report_date}", "",
-             "仅用于个人模拟研究与复盘，不构成投资建议，不连接实盘、不自动下单。", "",
+             "个人模拟复盘，不构成投资建议，不自动下单。", "",
              "## 今日结论", "", f"- {conclusion}", "",
              "## 事实依据", "",
              f"- 数据对应日期：{report_date}；环境分类：{regime or '缺失'}。",
              *environment_evidence,
-             f"- 本次读取历史缓存 {history_count} 只，其中该日期进入可交易样本范围 {universe_count} 只。",
+             f"- 缓存 {history_count} 只；当日可交易样本 {universe_count} 只。",
              f"- 筛选记录：{reason_text}。",
-             "- 上述原因按每只标的首个未通过条件计数；通过筛选后还受候选数量上限约束。", "",
+             "- 按首个未通过条件计数；通过后仍受名单数量上限约束。", "",
              "## 如何理解", "",
-             "- 环境分类用于执行事先设定的过滤规则，不是对明日涨跌的预测。",
-             "- 名单和模拟参数来自固定程序；排序靠前不等于上涨概率更高。", "",
+             "- 名单来自固定规则，不是对明日涨跌的预测。", "",
              "## 还不能判断", "",
-             "- 当前只覆盖已取得的缓存样本，不能视为完整全市场分析。",
-             "- 单日有无候选都不能证明策略有效；本日报没有完成长样本或独立对照验证。", "",
+             "- 仅覆盖缓存样本；单日名单不能证明策略有效，仍缺独立对照与长期验证。", "",
              "## 下一步", "",
-             "- 先检查数据日期与缺失项，再按原规则记录后续触发、退出和未触发情况。",
-             "- 用后续样本和预先设定的对照验证假设；不因一天的结果调整参数或晋级策略。", "",
-             "## 观察明细", ""]
-    if not candidates:
-        lines.append("- 本次无新增模拟候选。")
+             "- 核对日期和缺失项，继续记录触发与退出；验证后交人工决定，不按单日结果调参。"]
+    if candidates:
+        lines += ["", "## 观察明细", ""]
     for item in candidates:
         plan = scanner._build_trade_plan(item)
         lines += [f"- {item.get('name') or '名称缺失'}（{item.get('symbol') or '代码缺失'}）：",
@@ -98,9 +94,8 @@ def render_v3_report(report_date: str, market_profile: dict[str, Any], candidate
                   f"  规则计算的模拟仓位 {number(plan.get('position_pct'))}%；不代表账户已持有。",
                   f"  排序参考：量价因子 {number(item.get('alpha040'))}、60 日相对强弱分位 {_fmt_pct(item.get('rps60'))}（不是胜率）；距近 20 日高点 {_fmt_pct(item.get('close_to_20d_high'))}。"]
     lines += ["", "## 数据来源", "",
-              "- 来源为本次历史缓存、冻结策略配置与筛选记录；日期以本报告列明的统计日期为准。",
-              "- 排名、计划参数属于规则输出；本报告未生成新的因果归因。", "",
-              "仅为个人模拟研究记录；重要策略变化仍需独立实验、历史验证与人工确认。", ""]
+              "- 当日缓存、冻结配置与筛选记录。", "",
+              "个人模拟研究记录，不构成投资建议。", ""]
     return "\n".join(lines)
 
 

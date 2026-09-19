@@ -61,6 +61,25 @@ class DiagnosisTests(unittest.TestCase):
         raw = Path(first["report_path"]).with_name("facts.json").read_bytes()
         self.assertEqual(first["facts_sha256"], hashlib.sha256(raw).hexdigest())
 
+    def test_concise_report_preserves_evidence_and_links_to_full_audit(self) -> None:
+        result, facts, _ = self.run_case()
+        path = Path(result["report_path"])
+        report = path.read_text(encoding="utf-8")
+        self.assertLess(report.index("## 结论"), report.index("## 数据与指标"))
+        self.assertIn("有效归档 2 条，平均净收益 -1.00%", report)
+        self.assertIn("Inconclusive（证据不足）", report)
+        self.assertIn("均值不是组合收益", report)
+        self.assertIn("本次未调用或导入", report)
+        for issue in facts["quality"]["warnings"] + facts["quality"]["errors"]:
+            self.assertIn(issue, report)
+        for filename in ("facts.json", "result.json"):
+            self.assertIn(f"]({filename})", report)
+            self.assertTrue(path.with_name(filename).is_file())
+        for source in facts["sources"]:
+            self.assertEqual(len(source["sha256"]), 64)
+            self.assertTrue(Path(source["path"]).is_file())
+            self.assertNotIn(source["sha256"], report)
+
     def test_missing_inputs_produce_insufficient_report(self) -> None:
         result, facts, code = self.run_case(input_root=self.root / "absent", archive_path=self.root / "missing.csv")
         self.assertEqual(code, 0)
@@ -68,6 +87,9 @@ class DiagnosisTests(unittest.TestCase):
         self.assertEqual(facts["windows"], [])
         self.assertIsNone(facts["numeric_check"]["value"])
         self.assertTrue(facts["quality"]["warnings"])
+        report = Path(result["report_path"]).read_text(encoding="utf-8")
+        self.assertNotIn("| 窗口 |", report)
+        self.assertIn("无可用统计，缺失未按零处理", report)
 
     def test_missing_archive_does_not_turn_return_into_zero(self) -> None:
         _, facts, code = self.run_case(archive_path=self.root / "absent.csv")
