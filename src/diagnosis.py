@@ -186,52 +186,56 @@ def _prompt(facts: dict[str, Any], facts_hash: str) -> str:
 
 
 def _report(facts: dict[str, Any], interpretation: dict[str, Any]) -> str:
-    """输出一份中文报告，将程序事实、待审解释和人工决定分开展示。"""
-    demo = facts["source_kind"] == "synthetic_demo"
-    lines = ["# 策略健康诊断", "", DISCLAIMER, "",
-             "**合成教学示例：不是真实行情、交易或策略实验。**" if demo else "输入：本地已有复盘与模拟归档。",
-             "", "## 1. 问题", "", facts["question"], f"统计截止：{facts['as_of_date']}。", "",
-             "## 2. 数据检查", ""]
-    issues = facts["quality"]["errors"] + facts["quality"]["warnings"]
-    lines += [f"- {item}" for item in issues] or ["- 已提供文件通过结构检查；完整交易日覆盖仍未验证。"]
-    if facts["small_sample"]:
-        lines.append("- 样本不足：优先累积样本，不据此调参或晋级。")
-    lines += ["", "## 3. Python 指标", "", "由原 strategy_health.py 计算；窗口为自然日，比例各有自己的分母。",
-              "平均净收益是已提供归档的单笔算术均值，不是组合收益。", "",
-              "| 窗口 | 复盘数 | 触发率 | 止损率 | 止盈率 | 有收益归档数 | 归档胜率 | 平均净收益 |",
-              "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    """正文保留结论、数据问题与待办；完整来源和 AI 原文保留在同目录 JSON。"""
     def pct(value: Any) -> str:
         return "数据不足" if value is None else f"{value:.2%}"
+    check = facts["numeric_check"]
+    label = {"Rejected": "Rejected（不支持该陈述）", "Supported": "支持该样本内陈述",
+             "Inconclusive": "Inconclusive（无可用数值）"}[check["result"]]
+    lines = ["# 策略健康诊断", "", DISCLAIMER, ""]
+    if facts["source_kind"] == "synthetic_demo":
+        lines += ["**合成教学示例，不是真实行情或实验成绩。**", ""]
+    lines += [f"问题：{facts['question']}", f"截止日期：{facts['as_of_date']}。", "",
+              "## 结论", "", "- 策略有效性：Inconclusive（证据不足）。",
+              f"- 核对陈述：{check['claim']}。",
+              f"- 程序结果：{label}；有效归档 {check['sample_size']} 条，平均净收益 {pct(check['value'])}。",
+              "- 此结果仅针对所列样本，不能外推策略稳定性。", "", "## 数据与指标", ""]
+    issues = facts["quality"]["errors"] + facts["quality"]["warnings"]
+    lines += [f"- {item}" for item in dict.fromkeys(issues)]
+    if facts["small_sample"]:
+        lines.append("- 样本不足，不据此调参。")
+    if facts["windows"]:
+        lines += ["- 窗口为自然日，未核验完整交易日覆盖。触发/止损/止盈率按复盘数计算；胜率和均值按有收益归档计算，均值不是组合收益。", "",
+                  "| 窗口 | 复盘数 | 触发率 | 止损率 | 止盈率 | 有收益归档数 | 归档胜率 | 平均净收益 |",
+                  "|---|---:|---:|---:|---:|---:|---:|---:|"]
     for row in facts["windows"]:
         lines.append(f"| {row['window_days']} 日 | {row['reviewed_count']} | {pct(row['trigger_rate'])} | {pct(row['stop_loss_rate'])} | {pct(row['take_profit_rate'])} | {row['realized_trade_count']} | {pct(row['realized_win_rate'])} | {pct(row['avg_net_return'])} |")
     if not facts["windows"]:
-        lines.append("\n没有可用统计；缺失/格式错误没有被转换成零收益。")
-    check = facts["numeric_check"]
-    label = {"Rejected": "Rejected（该算术陈述被否决）", "Supported": "支持这项样本内算术陈述", "Inconclusive": "Inconclusive（无可用数值）"}[check["result"]]
-    lines += ["", "## 4. 一项可核查的数值陈述", "", check["claim"],
-              f"- Python 判断：{label}；有效归档 {check['sample_size']} 条，均值 {pct(check['value'])}。",
-              f"- {check['scope']}", "", "## 5. AI 候选解释与反方意见", ""]
-    if interpretation["status"] in {"not_requested", "skipped_data_unavailable"}:
-        lines += ["本次未调用或导入模型回答。agent_prompt.md 已准备好，解释和反方意见待补充。",
-                  "没有把模板文字或数值规则冒充 AI 分析。"]
-        if interpretation["status"] == "skipped_data_unavailable":
-            lines.append("已请求 AI，但没有可用统计或输入有错误，因此未启动模型调用。")
-    elif interpretation["status"] == "rejected":
-        lines.append("导入回答未通过检查，未用于结论：" + interpretation["error"])
+        lines.append("无可用统计，缺失未按零处理。")
+    status = interpretation["status"]
+    if status == "not_requested":
+        lines += ["", "AI：本次未调用或导入。"]
+    elif status == "skipped_data_unavailable":
+        lines += ["", "AI：输入不足或有错误，未启动调用。"]
+    elif status == "rejected":
+        lines += ["", "AI：结果未采纳，Python 数值保留。原因：" + interpretation["error"]]
     else:
         content = interpretation["content"]
-        origin = "调用请求的模型" if interpretation["status"] == "generated_manual_review_pending" else "导入来源（自行声明）"
-        lines += [f"{origin}：{content['model']}。**以下文字待人工核对，不覆盖 Python 数值。**"]
+        origin = "请求模型" if status == "generated_manual_review_pending" else "声明来源"
+        lines += ["", "## AI 观察（待人工核对）", "", f"{origin}：{content['model']}；结构检查不代表全文事实正确。"]
         for item in content["hypotheses"]:
-            lines += ["", f"### 候选：{item['claim']}", f"- 证据引用：{', '.join(item['evidence_ids'])}",
-                      f"- 反证/局限：{item['counterevidence']}", f"- 待验证：{item['next_check']}", f"- 置信程度：{item['confidence']}"]
-        lines += ["", "反方检查：", ""] + [f"- {item}" for item in content["critic"]]
-    lines += ["", "## 6. 结论与人工下一步", "", "策略有效性：Inconclusive（本次健康诊断不能证明稳定性）。",
-              "- 核对数据缺口、统计口径和 AI 文字；导入字段通过不代表全文事实正确。",
-              "- 候选解释需另行 Python 实验验证；独立实验、历史验证、人工确认后才讨论重要策略变化。",
-              "- 人工决定：待填写。此报告不自动改变任何策略或台账。", "", "## 来源", ""]
-    lines += [f"- {item['id']}：`{item['path']}`；SHA256 `{item['sha256']}`" for item in facts["sources"]]
-    lines += ["- python_metrics：本目录 facts.json 的 windows；data_quality：quality。", "", DISCLAIMER, ""]
+            lines += ["", f"### {item['claim']}", f"- 依据：{', '.join(item['evidence_ids'])}；置信程度：{item['confidence']}。",
+                      f"- 反证/局限：{item['counterevidence']}", f"- 待验证：{item['next_check']}"]
+        lines += ["", "反方意见：", ""] + [f"- {item}" for item in content["critic"]]
+    next_step = "先复核上述数据缺口，再补充有效样本。" if issues else "按预设对照与历史样本检验候选解释。"
+    if facts["small_sample"] and not issues:
+        next_step = "继续积累样本，再按预设对照检验。"
+    lines += ["", "## 下一步", "", f"- {next_step}"]
+    if status in {"generated_manual_review_pending", "imported_manual_review_pending"}:
+        lines.append("- 人工核对 AI 的证据引用和反方意见。")
+    lines += ["- 人工决定：待确认；报告不自动修改策略或台账。", "",
+              f"核对材料：[完整指标与 {len(facts['sources'])} 项来源](facts.json) · [运行状态与 AI 原文](result.json)。", "",
+              DISCLAIMER, ""]
     return "\n".join(lines)
 
 

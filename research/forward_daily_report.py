@@ -88,7 +88,7 @@ def build_report(state_dir: Path = FS, as_of_date: str | None = None) -> str:
         fired = {"true": True, "false": False, "1": True, "0": False}.get(fired_text)
         status = "已触发模拟观察" if fired is True else "未触发模拟观察" if fired is False else "触发状态缺失"
         count = event.loc[event.get("fired", pd.Series("", index=event.index)).astype(str).str.lower().isin(["true", "1"]), "date"].nunique()
-        facts.append(f"反弹事件：{row['date']} {status}；累计记录 {count} 个触发日期，不按同日股票只数扩大事件样本。")
+        facts.append(f"反弹事件：{row['date']} {status}；累计记录 {count} 个触发日期（同日多只股票算一次）。")
         ret5, ret1, ret60 = (_number(row.get(key)) for key in ("ret5", "ret1", "ret60"))
         if fired is None or any(value is None for value in (ret5, ret1, ret60)):
             issues.append("反弹事件存在缺失指标或触发状态，不能完整核对条件。")
@@ -105,7 +105,7 @@ def build_report(state_dir: Path = FS, as_of_date: str | None = None) -> str:
         if not ledger.empty and "status" in ledger:
             holding = int(ledger["status"].eq("holding").sum())
             pending = int(ledger["status"].eq("pending_entry_next_open").sum())
-            details += [f"- 已提供明细中：模拟持有 {holding} 条，等待次日入场 {pending} 条；两者分别计数。", ""]
+            details += [f"- 模拟持有 {holding} 条，等待次日入场 {pending} 条。", ""]
         elif not ledger.empty:
             issues.append("反弹模拟明细缺少状态，无法区分模拟持有与等待入场。")
 
@@ -125,7 +125,7 @@ def build_report(state_dir: Path = FS, as_of_date: str | None = None) -> str:
                 issues.append(f"{label} 的目标比例缺失或越界，需检查原记录。")
             if old_value is not None and not 0 <= old_value <= 1:
                 issues.append(f"{label} 的上一条目标比例越界，未计算变化。")
-        details += ["- 目标比例表示规则在模拟框架中允许投入的资金比例；变化不等于收益改善。", ""]
+        details.append("")
         for threshold, name in ((60, "诊断"), (120, "早停检查"), (250, "主评估"), (500, "确认")):
             if len(gate) < threshold:
                 next_steps.append(f"风险控制规则距离第 {threshold} 个记录日的“{name}”检查点，还差 {threshold - len(gate)} 个记录日；未核验日期连续性。")
@@ -138,17 +138,17 @@ def build_report(state_dir: Path = FS, as_of_date: str | None = None) -> str:
         facts.append(f"市场活跃度：{row['date']} 的涨停池有 {_fmt(row.get('limit_up_pool_n'), digits=0)} 只，最长连续涨停 {_fmt(row.get('max_streak'), digits=0)} 天。")
         details += ["### 市场活跃度明细", "",
                     f"- 连续两天及以上涨停 {_fmt(row.get('streak2_n'), digits=0)} 只；尾盘封板 {_fmt(row.get('late_seal_n'), digits=0)} 只；封单合计 {_fmt(row.get('seal_money_sum'))} 亿元。",
-                    "- 这些是当日数量记录；缺少可比历史或对照时，不写成“明天会上涨”的判断。", ""]
+                    ""]
         if _number(row.get("limit_up_pool_n")) is None:
             issues.append("市场活跃度的涨停数量缺失，不能解释为零只。")
 
     if not cb.empty:
         day = cb[cb["date"] == cb.iloc[-1]["date"]].copy()
         row = day.iloc[0]
-        facts.append(f"转债观察：{row['date']} 的既定筛选范围内，价格低于 100 元的有 {_fmt(row.get('cb_below_100_n'), digits=0)} 只；这是辅助价格指标。")
+        facts.append(f"转债观察：{row['date']} 筛选范围内，价格低于 100 元的有 {_fmt(row.get('cb_below_100_n'), digits=0)} 只。")
         details += ["### 转债辅助指标", "",
                     f"- 双低指标中位数 {_fmt(row.get('cb_dlow_median'))}；双低是价格和溢价率的排序指标，不是收益率。",
-                    "- 当前没有完整筛选范围的分母，不计算低价券占比；也不由此直接推断违约风险或 A 股涨跌。"]
+                    "- 缺少范围分母，不计算低价券占比；不能据此推断违约风险或 A 股涨跌。"]
         if "rank" in day:
             day = day.assign(_rank=pd.to_numeric(day["rank"], errors="coerce")).sort_values("_rank", kind="stable")
         if {"名称", "双低"} <= set(day.columns):
@@ -170,25 +170,23 @@ def build_report(state_dir: Path = FS, as_of_date: str | None = None) -> str:
     elif not dividend.empty:
         issues.append("季度红利名单缺少季度标记，无法判断更新范围。")
 
-    conclusion = "本期记录用于检查观察是否持续、数据是否完整，尚不能据此判断策略有效。"
+    conclusion = "各日频观察线均有当日记录，具体数值和缺口见下。"
     if not_current:
-        conclusion = f"有 {len(not_current)} 条日频观察线未提供 {today} 的记录；以下按各自最新日期汇报，不把旧记录当成今日新信号。"
+        conclusion = f"有 {len(not_current)} 条日频观察线未提供 {today} 的记录，不把旧记录当成今日新信号。"
     lines = [f"# 前向观察日报｜{today}", "",
-             "个人模拟研究留痕，不构成投资建议；本报告没有执行交易或调整策略。", "",
+             "个人模拟研究记录，不构成投资建议。", "",
              "## 今日结论", "", f"- {conclusion}", "",
              "## 事实依据", "", *[f"- {item}" for item in facts], "",
              "## 如何理解", "",
-             "- 先区分事件是否发生、规则输出了什么、后续结果如何。前两项不能替代收益和稳定性验证。",
-             "- 当前记录之间即使同时变化，也不能直接写成因果关系；需要历史比较、对照和足够样本。", "",
+             "- 记录同时变化不能直接写成因果关系，需要历史对照与足够样本。", "",
              "## 还不能判断", "",
-             "- 单日触发、目标比例或市场数量，都不足以证明某条策略有效；本报告没有做新的收益回测。",
-             "- 日期不一致时先检查交易日历与任务输入，不仅凭更新日期认定任务失败。",
+             "- 单日记录不能证明策略有效；日期滞后需先核对交易日历，不能直接认定任务失败。",
              *[f"- {item}" for item in issues], "",
              "## 下一步", "", *[f"- {item}" for item in next_steps],
-             "- 先复核数据缺口，继续按冻结规则记录；策略变化需独立验证和人工确认。", "",
+             "- 复核缺口，按冻结规则继续记录；策略变化须独立验证与人工确认。", "",
              "## 观察明细", "", *details,
              "## 数据来源", "", "- 最新日频记录：" + "；".join(f"{name} {day}" for name, day in dates.items()) + "。",
-             "- 数据来自已留痕的前向观察台账；本次只读取并汇总，没有补造缺失值。", "",
+             "- 来源：前向观察台账；缺失值未补造。", "",
              "个人模拟研究记录，不构成投资建议。", ""]
     return "\n".join(lines)
 
